@@ -1,0 +1,1432 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>PRONO · CDM 2026</title>
+  <meta name="description" content="Suivi de paris entre amis — Coupe du Monde 2026" />
+  <meta name="theme-color" content="#0b2f1e" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png" />
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="PRONO" />
+  <style>html,body{margin:0;background:#0b2f1e}</style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+  <script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+
+  <script>
+    /* ⚙️ Configuration Firebase du projet Prono-CDM2026 */
+    window.FIREBASE_CONFIG = {
+      apiKey: "AIzaSyDSy1vtTigguR5iOHIdyuo5bB2iCoTsvak",
+      authDomain: "prono-cdm2026-89d51.firebaseapp.com",
+      databaseURL: "https://prono-cdm2026-89d51-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "prono-cdm2026-89d51",
+      storageBucket: "prono-cdm2026-89d51.firebasestorage.app",
+      messagingSenderId: "151799178579",
+      appId: "1:151799178579:web:241b72ba67258c3116eda6",
+    };
+  </script>
+
+  <script>
+const { useState, useEffect, useRef, useCallback } = React;
+const { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } = Recharts;
+const GROUPES = {
+  A: ["\u{1F1F2}\u{1F1FD} Mexique", "\u{1F1FF}\u{1F1E6} Afrique du Sud", "\u{1F1F0}\u{1F1F7} Cor\xE9e du Sud", "\u{1F1E8}\u{1F1FF} Tch\xE9quie"],
+  B: ["\u{1F1E8}\u{1F1E6} Canada", "\u{1F1E7}\u{1F1E6} Bosnie-Herz\xE9govine", "\u{1F1F6}\u{1F1E6} Qatar", "\u{1F1E8}\u{1F1ED} Suisse"],
+  C: ["\u{1F1E7}\u{1F1F7} Br\xE9sil", "\u{1F1F2}\u{1F1E6} Maroc", "\u{1F1ED}\u{1F1F9} Ha\xEFti", "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F} \xC9cosse"],
+  D: ["\u{1F1FA}\u{1F1F8} \xC9tats-Unis", "\u{1F1F5}\u{1F1FE} Paraguay", "\u{1F1E6}\u{1F1FA} Australie", "\u{1F1F9}\u{1F1F7} Turquie"],
+  E: ["\u{1F1E9}\u{1F1EA} Allemagne", "\u{1F1E8}\u{1F1FC} Cura\xE7ao", "\u{1F1E8}\u{1F1EE} C\xF4te d'Ivoire", "\u{1F1EA}\u{1F1E8} \xC9quateur"],
+  F: ["\u{1F1F3}\u{1F1F1} Pays-Bas", "\u{1F1EF}\u{1F1F5} Japon", "\u{1F1F8}\u{1F1EA} Su\xE8de", "\u{1F1F9}\u{1F1F3} Tunisie"],
+  G: ["\u{1F1E7}\u{1F1EA} Belgique", "\u{1F1EA}\u{1F1EC} \xC9gypte", "\u{1F1EE}\u{1F1F7} Iran", "\u{1F1F3}\u{1F1FF} Nouvelle-Z\xE9lande"],
+  H: ["\u{1F1EA}\u{1F1F8} Espagne", "\u{1F1E8}\u{1F1FB} Cap-Vert", "\u{1F1F8}\u{1F1E6} Arabie Saoudite", "\u{1F1FA}\u{1F1FE} Uruguay"],
+  I: ["\u{1F1EB}\u{1F1F7} France", "\u{1F1F8}\u{1F1F3} S\xE9n\xE9gal", "\u{1F1EE}\u{1F1F6} Irak", "\u{1F1F3}\u{1F1F4} Norv\xE8ge"],
+  J: ["\u{1F1E6}\u{1F1F7} Argentine", "\u{1F1E9}\u{1F1FF} Alg\xE9rie", "\u{1F1E6}\u{1F1F9} Autriche", "\u{1F1EF}\u{1F1F4} Jordanie"],
+  K: ["\u{1F1F5}\u{1F1F9} Portugal", "\u{1F1E8}\u{1F1E9} RD Congo", "\u{1F1FA}\u{1F1FF} Ouzb\xE9kistan", "\u{1F1E8}\u{1F1F4} Colombie"],
+  L: ["\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E006C}\u{E007F} Angleterre", "\u{1F1ED}\u{1F1F7} Croatie", "\u{1F1EC}\u{1F1ED} Ghana", "\u{1F1F5}\u{1F1E6} Panama"]
+};
+const AVATARS = ["\u26BD", "\u{1F981}", "\u{1F43A}", "\u{1F985}", "\u{1F419}", "\u{1F525}", "\u{1F340}", "\u{1F3AF}", "\u{1F988}", "\u{1F451}", "\u{1F0CF}", "\u{1F680}"];
+const fb = (() => {
+  try {
+    const cfg = window.FIREBASE_CONFIG;
+    if (!cfg || !cfg.databaseURL || String(cfg.apiKey).includes("REMPLACE")) return null;
+    firebase.initializeApp(cfg);
+    return firebase.database();
+  } catch (e) {
+    return null;
+  }
+})();
+const keyToPath = (key) => key.replace(":", "/");
+const store = {
+  available: !!fb,
+  async get(key, shared = true) {
+    if (!shared) {
+      try {
+        const v = localStorage.getItem("prono." + key);
+        return v ? JSON.parse(v) : null;
+      } catch (e) {
+        return null;
+      }
+    }
+    try {
+      const snap = await fb.ref(keyToPath(key)).get();
+      return snap.exists() ? snap.val() : null;
+    } catch (e) {
+      return null;
+    }
+  },
+  async set(key, value, shared = true) {
+    if (!shared) {
+      try {
+        localStorage.setItem("prono." + key, JSON.stringify(value));
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+    try {
+      await fb.ref(keyToPath(key)).set(value);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  },
+  async delete(key, shared = true) {
+    if (!shared) {
+      try {
+        localStorage.removeItem("prono." + key);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+    try {
+      await fb.ref(keyToPath(key)).remove();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  },
+  subscribe(path, cb) {
+    const ref = fb.ref(path);
+    const handler = ref.on("value", (snap) => cb(snap.val()));
+    return () => ref.off("value", handler);
+  }
+};
+const EUR = (n) => (Number.isFinite(n) ? n : 0).toLocaleString("fr-FR", {
+  style: "currency",
+  currency: "EUR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+const signEUR = (n) => (n > 0 ? "+" : "") + EUR(n);
+const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+function computeStats(player, bets) {
+  let settledProfit = 0, pendingStake = 0, wins = 0, losses = 0, refunds = 0, pendingCount = 0, stakedSettled = 0, cotesSum = 0, cotesN = 0;
+  for (const b of bets) {
+    const mise = +b.mise || 0;
+    const cote = +b.cote || 0;
+    if (cote > 0) {
+      cotesSum += cote;
+      cotesN++;
+    }
+    if (b.statut === "gagne") {
+      settledProfit += mise * (cote - 1);
+      wins++;
+      stakedSettled += mise;
+    } else if (b.statut === "perdu") {
+      settledProfit -= mise;
+      losses++;
+      stakedSettled += mise;
+    } else if (b.statut === "rembourse") {
+      refunds++;
+    } else {
+      pendingStake += mise;
+      pendingCount++;
+    }
+  }
+  const start = +player.start || 0;
+  const redeposits = (player.deposits || []).reduce((s, d) => s + (+d.amount || 0), 0);
+  const totalIn = start + redeposits;
+  return {
+    profit: settledProfit,
+    bankroll: totalIn + settledProfit - pendingStake,
+    enJeu: pendingStake,
+    pendingCount,
+    wins,
+    losses,
+    refunds,
+    total: bets.length,
+    totalIn,
+    redeposits,
+    rendement: totalIn > 0 ? settledProfit / totalIn : 0,
+    roi: stakedSettled > 0 ? settledProfit / stakedSettled : 0,
+    coteMoy: cotesN > 0 ? cotesSum / cotesN : 0,
+    winRate: wins + losses > 0 ? wins / (wins + losses) : 0
+  };
+}
+function bankrollSeries(player, bets) {
+  const events = [];
+  for (const b of bets) {
+    if (b.statut !== "gagne" && b.statut !== "perdu") continue;
+    const mise = +b.mise || 0, cote = +b.cote || 0;
+    events.push({ t: b.settledAt || b.createdAt || 0, dP: b.statut === "gagne" ? mise * (cote - 1) : -mise, dIn: 0 });
+  }
+  for (const d of player.deposits || []) events.push({ t: +d.at || 0, dP: 0, dIn: +d.amount || 0 });
+  events.sort((a, b) => a.t - b.t);
+  const start = +player.start || 0;
+  let cumP = 0, totalIn = start;
+  const fmt = (t) => new Date(t).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+  const data = [{ label: "D\xE9part", bankroll: Math.round(start * 100) / 100, rendement: 0 }];
+  for (const e of events) {
+    cumP += e.dP;
+    totalIn += e.dIn;
+    data.push({
+      label: fmt(e.t),
+      bankroll: Math.round((totalIn + cumP) * 100) / 100,
+      rendement: totalIn > 0 ? Math.round(cumP / totalIn * 1e3) / 10 : 0
+    });
+  }
+  return data;
+}
+const PLAYER_COLORS = ["#f5c543", "#5cc97a", "#e5533c", "#8fa6c9", "#c97ae0", "#7ad6e0", "#e0a37a", "#aee07a"];
+function buildActivity(players, betsByPlayer, n = 4) {
+  const ev = [];
+  for (const [pid, bets] of Object.entries(betsByPlayer)) {
+    const p = players[pid];
+    if (!p) continue;
+    for (const b of bets) {
+      const mise = +b.mise || 0, cote = +b.cote || 0;
+      if (b.statut === "gagne")
+        ev.push({ t: b.settledAt || b.createdAt, txt: `\u{1F525} ${p.name} a gagn\xE9 \xAB ${b.label} \xBB (${signEUR(mise * (cote - 1))})` });
+      else if (b.statut === "perdu")
+        ev.push({ t: b.settledAt || b.createdAt, txt: `\u{1F480} ${p.name} a perdu \xAB ${b.label} \xBB (${signEUR(-mise)})` });
+      else if (!b.statut || b.statut === "en_cours")
+        ev.push({ t: b.createdAt, txt: `\u{1F39F}\uFE0F ${p.name} a mis\xE9 ${EUR(mise)} sur \xAB ${b.label} \xBB @ ${cote.toLocaleString("fr-FR", { minimumFractionDigits: 2 })}` });
+    }
+  }
+  return ev.filter((e) => e.t).sort((a, b) => b.t - a.t).slice(0, n);
+}
+function buildComparison(players, betsByPlayer) {
+  const events = [];
+  for (const [pid, bets] of Object.entries(betsByPlayer)) {
+    if (!players[pid]) continue;
+    for (const b of bets) {
+      if (b.statut !== "gagne" && b.statut !== "perdu") continue;
+      const mise = +b.mise || 0, cote = +b.cote || 0;
+      events.push({ pid, t: b.settledAt || b.createdAt || 0, delta: b.statut === "gagne" ? mise * (cote - 1) : -mise });
+    }
+  }
+  if (events.length < 2) return null;
+  events.sort((a, b) => a.t - b.t);
+  const pids = [...new Set(events.map((e) => e.pid))];
+  const cums = {};
+  const data = [{ label: "D\xE9part", ...Object.fromEntries(pids.map((id) => [id, 0])) }];
+  for (const e of events) {
+    cums[e.pid] = (cums[e.pid] || 0) + e.delta;
+    const row = { label: new Date(e.t).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) };
+    for (const id of pids) row[id] = Math.round((cums[id] || 0) * 100) / 100;
+    data.push(row);
+  }
+  return { data, pids };
+}
+function buildAwards(players, betsByPlayer) {
+  let sniper = null, kamikaze = null, escroc = null, metronome = null;
+  for (const p of Object.values(players)) {
+    const bets = betsByPlayer[p.id] || [];
+    for (const b of bets) {
+      const cote = +b.cote || 0, mise = +b.mise || 0;
+      if (b.statut === "gagne" && (!sniper || cote > sniper.v)) sniper = { p, v: cote };
+      if (mise > 0 && (!kamikaze || mise > kamikaze.v)) kamikaze = { p, v: mise };
+    }
+    const red = (p.deposits || []).reduce((sum, d) => sum + (+d.amount || 0), 0);
+    if (red > 0 && (!escroc || red > escroc.v)) escroc = { p, v: red };
+    const st = computeStats(p, bets);
+    if (st.wins + st.losses >= 3 && (!metronome || st.winRate > metronome.v)) metronome = { p, v: st.winRate };
+  }
+  const out = [];
+  if (sniper) out.push({ icon: "\u{1F3AF}", title: "Le Sniper", who: sniper.p, detail: "cote gagn\xE9e la plus haute \xB7 " + sniper.v.toFixed(2) });
+  if (kamikaze) out.push({ icon: "\u{1F4A3}", title: "Le Kamikaze", who: kamikaze.p, detail: "plus grosse mise \xB7 " + EUR(kamikaze.v) });
+  if (metronome) out.push({ icon: "\u{1F4D0}", title: "Le M\xE9tronome", who: metronome.p, detail: Math.round(metronome.v * 100) + " % de r\xE9ussite" });
+  if (escroc) out.push({ icon: "\u{1F99D}", title: "L'Escroc", who: escroc.p, detail: EUR(escroc.v) + " red\xE9pos\xE9s" });
+  return out;
+}
+function compressImage(file, maxDim = 900, quality = 0.6) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("image illisible"));
+    };
+    img.src = url;
+  });
+}
+const STATUT_META = {
+  en_cours: { label: "En cours", cls: "pending" },
+  gagne: { label: "Gagn\xE9", cls: "won" },
+  perdu: { label: "Perdu", cls: "lost" },
+  rembourse: { label: "Rembours\xE9", cls: "refund" }
+};
+function parseLink(raw) {
+  try {
+    const u = new URL(raw.trim());
+    if (!/^https?:$/.test(u.protocol)) return null;
+    const iid = u.searchParams.get("iid");
+    return { url: u.href, iid: iid ? decodeURIComponent(iid) : null };
+  } catch (e) {
+    return null;
+  }
+}
+function bookFromUrl(url) {
+  try {
+    const h = new URL(url).hostname.replace(/^www\./, "");
+    if (/(^|\.)stake\./i.test("." + h) || /^stake\./i.test(h)) return "Stake";
+    if (/winamax/i.test(h)) return "Winamax";
+    if (/betclic/i.test(h)) return "Betclic";
+    if (/unibet/i.test(h)) return "Unibet";
+    if (/pmu\./i.test(h)) return "PMU";
+    if (/zebet/i.test(h)) return "ZEbet";
+    const base = h.split(".")[0];
+    return base.charAt(0).toUpperCase() + base.slice(1);
+  } catch (e) {
+    return "le bookmaker";
+  }
+}
+function parseTicketCode(text) {
+  var _a, _b, _c, _d;
+  const t = (text || "").trim();
+  if (!t) return null;
+  const asLink = parseLink(t);
+  if (asLink) return { kind: "url", ...asLink };
+  try {
+    const j = JSON.parse(t);
+    if (!j || typeof j !== "object") return null;
+    const selections = (Array.isArray(j.selections) ? j.selections : []).map((s) => {
+      var _a2, _b2;
+      return {
+        match: String(s.match || s.label || "").trim(),
+        pick: String(s.pick || s.selection || "").trim(),
+        cote: Number.isFinite(parseFloat((_a2 = s.cote) != null ? _a2 : s.odds)) ? parseFloat((_b2 = s.cote) != null ? _b2 : s.odds) : null
+      };
+    }).filter((s) => s.match || s.pick);
+    const cote = parseFloat((_b = (_a = j.cote) != null ? _a : j.odds) != null ? _b : j.coteTotale);
+    const mise = parseFloat((_d = (_c = j.mise) != null ? _c : j.stake) != null ? _d : j.amount);
+    return {
+      kind: "code",
+      iid: j.iid || null,
+      url: typeof j.url === "string" ? j.url : null,
+      selections,
+      cote: Number.isFinite(cote) ? cote : null,
+      mise: Number.isFinite(mise) ? mise : null
+    };
+  } catch (e) {
+    return null;
+  }
+}
+function App() {
+  const [phase, setPhase] = useState("loading");
+  const [me, setMe] = useState(null);
+  const [players, setPlayers] = useState({});
+  const [betsByPlayer, setBetsByPlayer] = useState({});
+  const [tab, setTab] = useState("classement");
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [statsFor, setStatsFor] = useState(null);
+  const toastTimer = useRef(null);
+  const joiningRef = useRef(false);
+  const showToast = (msg) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2600);
+  };
+  const loadAll = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const p = await store.get("players", true) || {};
+      const rawB = await store.get("bets", true) || {};
+      const b = {};
+      for (const [id, arr] of Object.entries(rawB)) b[id] = Array.isArray(arr) ? arr : Object.values(arr || {});
+      setPlayers(p && typeof p === "object" ? p : {});
+      setBetsByPlayer(b);
+      setLastSync(/* @__PURE__ */ new Date());
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (!store.available) {
+      setPhase("nostorage");
+      return;
+    }
+    const offPlayers = store.subscribe("players", (val) => {
+      setPlayers(val && typeof val === "object" ? val : {});
+      setLastSync(/* @__PURE__ */ new Date());
+      setPhase((ph) => ph === "loading" ? "decide" : ph);
+    });
+    const offBets = store.subscribe("bets", (val) => {
+      const b = {};
+      for (const [id, arr] of Object.entries(val || {})) b[id] = Array.isArray(arr) ? arr : Object.values(arr || {});
+      setBetsByPlayer(b);
+      setLastSync(/* @__PURE__ */ new Date());
+    });
+    return () => {
+      offPlayers();
+      offBets();
+    };
+  }, []);
+  useEffect(() => {
+    if (phase !== "decide") return;
+    (async () => {
+      const meStored = await store.get("me", false);
+      if (meStored && meStored.playerId) {
+        setMe(meStored.playerId);
+        setStatsFor(meStored.playerId);
+        setPhase("app");
+      } else {
+        setPhase("join");
+      }
+    })();
+  }, [phase]);
+  useEffect(() => {
+    if (phase !== "app" || !me) return;
+    if (Object.keys(players).length > 0 && !players[me]) {
+      store.delete("me", false);
+      setMe(null);
+      setPhase("join");
+    }
+  }, [phase, me, players]);
+  async function joinAs({ name, emoji, start }) {
+    if (joiningRef.current || me) return;
+    joiningRef.current = true;
+    try {
+      const clean = name.trim();
+      const fresh = Object.values(await store.get("players", true) || {});
+      const taken = fresh.some((p) => (p.name || "").trim().toLowerCase() === clean.toLowerCase());
+      if (taken) {
+        showToast("Ce pseudo est d\xE9j\xE0 pris");
+        return;
+      }
+      const id = clean.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12) + "-" + uid().slice(0, 4);
+      const player = { id, name: clean, emoji, start: +start, deposits: [], createdAt: Date.now() };
+      const ok = await store.set("players:" + id, player, true);
+      if (!ok) {
+        showToast("\xC9chec d'enregistrement, r\xE9essaie");
+        return;
+      }
+      await store.set("bets:" + id, [], true);
+      await store.set("me", { playerId: id }, false);
+      setMe(id);
+      setStatsFor(id);
+      await loadAll();
+      setPhase("app");
+      showToast(`Bienvenue ${player.name} !`);
+    } finally {
+      joiningRef.current = false;
+    }
+  }
+  async function deletePlayer(pid) {
+    if (pid !== me) {
+      showToast("Tu ne peux supprimer que ton propre compte");
+      return;
+    }
+    for (const b of betsByPlayer[pid] || []) {
+      if (b.hasProof) await store.delete("proofs:" + b.id, true);
+    }
+    await store.delete("bets:" + pid, true);
+    await store.delete("players:" + pid, true);
+    await store.delete("me", false);
+    setPlayers((prev) => {
+      const n = { ...prev };
+      delete n[pid];
+      return n;
+    });
+    setBetsByPlayer((prev) => {
+      const n = { ...prev };
+      delete n[pid];
+      return n;
+    });
+    setMe(null);
+    setStatsFor(null);
+    setPhase("join");
+    showToast("Ton compte a \xE9t\xE9 supprim\xE9 \u{1F9F9}");
+  }
+  async function addFunds(amount) {
+    const player = players[me];
+    if (!player || !(amount > 0)) return;
+    const next = {
+      ...player,
+      deposits: [...player.deposits || [], { amount: +amount, at: Date.now() }]
+    };
+    const ok = await store.set("players:" + me, next, true);
+    if (!ok) {
+      showToast("\xC9chec du red\xE9p\xF4t, r\xE9essaie");
+      return;
+    }
+    setPlayers((prev) => ({ ...prev, [me]: next }));
+    showToast(`Red\xE9p\xF4t de ${EUR(+amount)} effectu\xE9 \u{1F4B0}`);
+  }
+  async function saveMyBets(next) {
+    const ok = await store.set("bets:" + me, next, true);
+    if (!ok) {
+      showToast("\xC9chec de sauvegarde, r\xE9essaie");
+      return false;
+    }
+    setBetsByPlayer((prev) => ({ ...prev, [me]: next }));
+    return true;
+  }
+  async function addBet(bet) {
+    const mine = betsByPlayer[me] || [];
+    if (bet.iid && mine.some((b) => b.iid === bet.iid) || bet.url && mine.some((b) => b.url === bet.url)) {
+      showToast("Ce ticket est d\xE9j\xE0 enregistr\xE9");
+      return;
+    }
+    const id = uid();
+    const { proof, ...rest } = bet;
+    if (proof) await store.set("proofs:" + id, proof, true);
+    const ok = await saveMyBets([
+      { ...rest, hasProof: !!proof, id, createdAt: Date.now(), statut: "en_cours" },
+      ...mine
+    ]);
+    if (ok) {
+      showToast("Ticket enregistr\xE9 \u{1F39F}\uFE0F");
+      setTab("paris");
+    } else if (proof) {
+      await store.delete("proofs:" + id, true);
+    }
+  }
+  async function setBetStatut(betId, statut) {
+    const mine = betsByPlayer[me] || [];
+    const next = mine.map(
+      (b) => b.id === betId ? { ...b, statut, settledAt: statut === "en_cours" ? null : Date.now() } : b
+    );
+    await saveMyBets(next);
+  }
+  async function deleteBet(betId) {
+    const mine = betsByPlayer[me] || [];
+    const target = mine.find((b) => b.id === betId);
+    if (target && target.hasProof) await store.delete("proofs:" + betId, true);
+    await saveMyBets(mine.filter((b) => b.id !== betId));
+    showToast("Ticket supprim\xE9");
+  }
+  async function restoreBackup(obj) {
+    if (!obj || typeof obj !== "object" || !obj.players || !obj.betsByPlayer) {
+      showToast("Fichier de sauvegarde invalide");
+      return;
+    }
+    for (const [id, p] of Object.entries(obj.players)) await store.set("players:" + id, p, true);
+    for (const [id, bets] of Object.entries(obj.betsByPlayer))
+      await store.set("bets:" + id, Array.isArray(bets) ? bets : [], true);
+    await loadAll();
+    showToast("Sauvegarde restaur\xE9e \u2713");
+  }
+  if (phase === "nostorage")
+    return /* @__PURE__ */ React.createElement(Shell, null, /* @__PURE__ */ React.createElement("div", { className: "join-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "join-card" }, /* @__PURE__ */ React.createElement("h1", { className: "brand" }, "PRONO"), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Configuration Firebase manquante ou invalide. Ouvre ", /* @__PURE__ */ React.createElement("code", null, "index.html"), " et remplace le bloc ", /* @__PURE__ */ React.createElement("code", null, "window.FIREBASE_CONFIG"), " par la configuration de ton projet Firebase (voir README.md)."))));
+  if (phase === "loading")
+    return /* @__PURE__ */ React.createElement(Shell, null, /* @__PURE__ */ React.createElement("div", { className: "loading-screen" }, /* @__PURE__ */ React.createElement("div", { className: "ball-spin" }, "\u26BD"), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "\xC9chauffement\u2026")));
+  if (phase === "join")
+    return /* @__PURE__ */ React.createElement(Shell, null, /* @__PURE__ */ React.createElement(
+      JoinScreen,
+      {
+        onJoin: joinAs,
+        nbPlayers: Object.keys(players).length,
+        takenNames: Object.values(players).map((p) => p.name.trim().toLowerCase())
+      }
+    ));
+  const allBets = Object.entries(betsByPlayer).flatMap(([pid, bets]) => bets.map((b) => ({ ...b, playerId: pid }))).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const ranking = Object.values(players).map((p) => ({ player: p, stats: computeStats(p, betsByPlayer[p.id] || []) })).sort(
+    (a, b) => b.stats.rendement - a.stats.rendement || b.stats.profit - a.stats.profit || b.stats.roi - a.stats.roi
+  );
+  const myStats = players[me] ? computeStats(players[me], betsByPlayer[me] || []) : null;
+  const activity = buildActivity(players, betsByPlayer);
+  const comparison = buildComparison(players, betsByPlayer);
+  const awards = buildAwards(players, betsByPlayer);
+  return /* @__PURE__ */ React.createElement(Shell, null, /* @__PURE__ */ React.createElement("header", { className: "topbar" }, /* @__PURE__ */ React.createElement("div", { className: "brand-row" }, /* @__PURE__ */ React.createElement("h1", { className: "brand" }, "PRONO"), /* @__PURE__ */ React.createElement("span", { className: "brand-sub" }, "CDM 2026 \xB7 entre amis")), /* @__PURE__ */ React.createElement("button", { className: "sync-btn", onClick: loadAll, "aria-label": "Actualiser" }, /* @__PURE__ */ React.createElement("span", { className: syncing ? "ball-spin" : "" }, "\u26BD"), /* @__PURE__ */ React.createElement("span", { className: "sync-time" }, syncing ? "sync\u2026" : lastSync ? lastSync.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "\u2014"))), /* @__PURE__ */ React.createElement("main", { className: "content" }, tab === "classement" && /* @__PURE__ */ React.createElement(
+    Leaderboard,
+    {
+      ranking,
+      me,
+      players,
+      activity,
+      comparison,
+      awards,
+      onSelect: (pid) => {
+        setStatsFor(pid);
+        setTab("stats");
+      }
+    }
+  ), tab === "paris" && /* @__PURE__ */ React.createElement(
+    BetsFeed,
+    {
+      bets: allBets,
+      players,
+      me,
+      onStatut: setBetStatut,
+      onDelete: deleteBet
+    }
+  ), tab === "nouveau" && /* @__PURE__ */ React.createElement(NewBet, { onSubmit: addBet, available: myStats ? myStats.bankroll : 0 }), tab === "stats" && /* @__PURE__ */ React.createElement(
+    StatsView,
+    {
+      players,
+      betsByPlayer,
+      statsFor: statsFor || me,
+      setStatsFor,
+      me,
+      onDeposit: addFunds,
+      onRestore: restoreBackup,
+      onDeletePlayer: deletePlayer
+    }
+  )), /* @__PURE__ */ React.createElement("nav", { className: "tabbar" }, [
+    ["classement", "\u{1F3C6}", "Classement"],
+    ["paris", "\u{1F39F}\uFE0F", "Paris"],
+    ["nouveau", "\uFF0B", "Parier"],
+    ["stats", "\u{1F4CA}", "Stats"]
+  ].map(([id, icon, label]) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: id,
+      className: "tab" + (tab === id ? " active" : "") + (id === "nouveau" ? " cta" : ""),
+      onClick: () => setTab(id)
+    },
+    /* @__PURE__ */ React.createElement("span", { className: "tab-icon" }, icon),
+    /* @__PURE__ */ React.createElement("span", { className: "tab-label" }, label)
+  ))), toast && /* @__PURE__ */ React.createElement("div", { className: "toast" }, toast));
+}
+function JoinScreen({ onJoin, nbPlayers, takenNames = [] }) {
+  const [name, setName] = useState("");
+  const [emoji, setEmoji] = useState("\u26BD");
+  const [start, setStart] = useState("100");
+  const [busy, setBusy] = useState(false);
+  const nameTaken = takenNames.includes(name.trim().toLowerCase());
+  const valid = name.trim().length >= 2 && +start > 0 && !nameTaken && !busy;
+  async function handleJoin() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await onJoin({ name, emoji, start });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return /* @__PURE__ */ React.createElement("div", { className: "join-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "join-hero" }, /* @__PURE__ */ React.createElement("div", { className: "center-circle", "aria-hidden": "true" }), /* @__PURE__ */ React.createElement("img", { className: "logo-hero", src: "./logo.jpg", alt: "PRONO 2026" }), /* @__PURE__ */ React.createElement("p", { className: "hero-sub" }, "Coupe du Monde 2026 \xB7 11 juin \u2192 19 juillet"), /* @__PURE__ */ React.createElement("p", { className: "hero-line" }, nbPlayers > 0 ? `${nbPlayers} joueur${nbPlayers > 1 ? "s" : ""} d\xE9j\xE0 sur la pelouse. \xC0 toi.` : "Premier sur la pelouse. Lance le concours.")), /* @__PURE__ */ React.createElement("div", { className: "join-card" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Ton pr\xE9nom"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      value: name,
+      maxLength: 20,
+      placeholder: "Luc",
+      onChange: (e) => setName(e.target.value)
+    }
+  ), nameTaken && /* @__PURE__ */ React.createElement("small", { className: "form-hint warn" }, "Ce pseudo est d\xE9j\xE0 pris par un autre joueur.")), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Ton avatar"), /* @__PURE__ */ React.createElement("div", { className: "emoji-grid" }, AVATARS.map((e) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: e,
+      type: "button",
+      className: "emoji-btn" + (emoji === e ? " sel" : ""),
+      onClick: () => setEmoji(e)
+    },
+    e
+  )))), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Bankroll de d\xE9part (\u20AC)"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "number",
+      inputMode: "decimal",
+      min: "1",
+      step: "1",
+      value: start,
+      onChange: (e) => setStart(e.target.value)
+    }
+  ), /* @__PURE__ */ React.createElement("small", { className: "muted" }, "Mettez tous le m\xEAme montant pour comparer les b\xE9n\xE9fices.")), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !valid, onClick: handleJoin }, busy ? "Inscription en cours\u2026" : "Entrer sur le terrain"), /* @__PURE__ */ React.createElement("small", { className: "muted center" }, "Les paris et bankrolls sont visibles par tous les amis qui ouvrent cette app.")));
+}
+function Leaderboard({ ranking, me, onSelect, players = {}, activity = [], comparison = null, awards = [] }) {
+  if (ranking.length === 0)
+    return /* @__PURE__ */ React.createElement(Empty, { icon: "\u{1F3DF}\uFE0F", text: "Personne sur le terrain pour l'instant." });
+  return /* @__PURE__ */ React.createElement("div", { className: "stack" }, activity.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "activity-card" }, activity.map((e, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "activity-line" }, e.txt))), /* @__PURE__ */ React.createElement("h2", { className: "section-title" }, "Classement g\xE9n\xE9ral"), ranking.map(({ player, stats }, i) => /* @__PURE__ */ React.createElement("button", { key: player.id, className: "rank-card", onClick: () => onSelect(player.id) }, /* @__PURE__ */ React.createElement("div", { className: "rank-pos" + (i === 0 ? " gold" : "") }, i === 0 ? "\u{1F451}" : i + 1), /* @__PURE__ */ React.createElement("div", { className: "rank-avatar" }, player.emoji), /* @__PURE__ */ React.createElement("div", { className: "rank-main" }, /* @__PURE__ */ React.createElement("div", { className: "rank-name" }, player.name, player.id === me && /* @__PURE__ */ React.createElement("span", { className: "me-chip" }, "moi")), /* @__PURE__ */ React.createElement("div", { className: "rank-meta" }, stats.wins, "V \xB7 ", stats.losses, "D \xB7 ", stats.pendingCount, " en cours", stats.wins + stats.losses > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", Math.round(stats.winRate * 100), " % WR")), /* @__PURE__ */ React.createElement("div", { className: "rank-meta" }, "Investi ", EUR(stats.totalIn), stats.redeposits > 0 && /* @__PURE__ */ React.createElement("span", { className: "redep-chip" }, "+", EUR(stats.redeposits), " red\xE9pos\xE9s"))), /* @__PURE__ */ React.createElement("div", { className: "rank-right" }, /* @__PURE__ */ React.createElement("div", { className: "rank-profit " + (stats.rendement > 0 ? "pos" : stats.rendement < 0 ? "neg" : "") }, (stats.rendement > 0 ? "+" : "") + (stats.rendement * 100).toFixed(1), " %"), /* @__PURE__ */ React.createElement("div", { className: "rank-sub " + (stats.profit > 0 ? "pos" : stats.profit < 0 ? "neg" : "") }, signEUR(stats.profit), " net"), /* @__PURE__ */ React.createElement("div", { className: "rank-bankroll" }, "Bankroll ", EUR(stats.bankroll))))), /* @__PURE__ */ React.createElement("p", { className: "muted center small" }, "Class\xE9 \xE0 la rentabilit\xE9 (b\xE9n\xE9fice net \xF7 total investi, red\xE9p\xF4ts inclus). Touche un joueur pour ses stats."), comparison && /* @__PURE__ */ React.createElement("div", { className: "chart-card" }, /* @__PURE__ */ React.createElement("div", { className: "chart-title" }, "La course \xB7 b\xE9n\xE9fice cumul\xE9 par joueur"), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 200 }, /* @__PURE__ */ React.createElement(LineChart, { data: comparison.data, margin: { top: 8, right: 8, bottom: 0, left: -16 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false }), /* @__PURE__ */ React.createElement(
+    Tooltip,
+    {
+      formatter: (v, key) => [EUR(v), players[key] ? players[key].name : key],
+      contentStyle: { background: "#0c2e1d", border: "1px solid #2c5a40", borderRadius: 10, color: "#f2f0e4", fontSize: 12 }
+    }
+  ), /* @__PURE__ */ React.createElement(ReferenceLine, { y: 0, stroke: "#2c5a40", strokeDasharray: "4 4" }), comparison.pids.map((pid, i) => /* @__PURE__ */ React.createElement(
+    Line,
+    {
+      key: pid,
+      type: "monotone",
+      dataKey: pid,
+      stroke: PLAYER_COLORS[i % PLAYER_COLORS.length],
+      strokeWidth: 2.5,
+      dot: false
+    }
+  )))), /* @__PURE__ */ React.createElement("div", { className: "legend-row" }, comparison.pids.map((pid, i) => /* @__PURE__ */ React.createElement("span", { key: pid, className: "legend-item" }, /* @__PURE__ */ React.createElement("i", { style: { background: PLAYER_COLORS[i % PLAYER_COLORS.length] } }), players[pid] ? players[pid].emoji + " " + players[pid].name : pid)))), awards.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("h2", { className: "section-title" }, "Titres en jeu"), /* @__PURE__ */ React.createElement("div", { className: "awards-grid" }, awards.map((a) => /* @__PURE__ */ React.createElement("div", { key: a.title, className: "award" }, /* @__PURE__ */ React.createElement("div", { className: "award-icon" }, a.icon), /* @__PURE__ */ React.createElement("div", { className: "award-body" }, /* @__PURE__ */ React.createElement("div", { className: "award-title" }, a.title), /* @__PURE__ */ React.createElement("div", { className: "award-who" }, a.who.emoji, " ", a.who.name), /* @__PURE__ */ React.createElement("div", { className: "award-detail" }, a.detail)))))));
+}
+function BetsFeed({ bets, players, me, onStatut, onDelete }) {
+  const [filter, setFilter] = useState("tous");
+  const filtered = bets.filter((b) => {
+    const st = b.statut || "en_cours";
+    if (filter === "moi") return b.playerId === me;
+    if (filter === "en_cours") return st === "en_cours";
+    if (filter === "passes") return st !== "en_cours";
+    if (filter === "gagne") return st === "gagne";
+    if (filter === "perdu") return st === "perdu";
+    return true;
+  });
+  return /* @__PURE__ */ React.createElement("div", { className: "stack" }, /* @__PURE__ */ React.createElement("div", { className: "filter-row" }, [
+    ["tous", "Tous"],
+    ["en_cours", "En cours"],
+    ["passes", "Termin\xE9s"],
+    ["gagne", "Gagn\xE9s"],
+    ["perdu", "Perdus"],
+    ["moi", "Mes paris"]
+  ].map(([id, label]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "chip" + (filter === id ? " sel" : ""), onClick: () => setFilter(id) }, label))), filtered.length === 0 ? /* @__PURE__ */ React.createElement(Empty, { icon: "\u{1F39F}\uFE0F", text: "Aucun ticket ici. Le guichet est ouvert !" }) : filtered.map((b) => /* @__PURE__ */ React.createElement(
+    BetTicket,
+    {
+      key: b.playerId + b.id,
+      bet: b,
+      player: players[b.playerId],
+      mine: b.playerId === me,
+      onStatut,
+      onDelete
+    }
+  )));
+}
+function BetTicket({ bet, player, mine, onStatut, onDelete }) {
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [proof, setProof] = useState(null);
+  const [proofLoading, setProofLoading] = useState(false);
+  async function toggleProof() {
+    if (proof) {
+      setProof(null);
+      return;
+    }
+    setProofLoading(true);
+    try {
+      const data = await store.get("proofs:" + bet.id, true);
+      setProof(typeof data === "string" ? data : null);
+    } finally {
+      setProofLoading(false);
+    }
+  }
+  const statut = bet.statut || "en_cours";
+  const meta = STATUT_META[statut];
+  const mise = +bet.mise || 0;
+  const cote = +bet.cote || 0;
+  const gainPotentiel = mise * cote;
+  const resultat = statut === "gagne" ? mise * (cote - 1) : statut === "perdu" ? -mise : 0;
+  return /* @__PURE__ */ React.createElement("div", { className: "ticket " + meta.cls }, /* @__PURE__ */ React.createElement("div", { className: "ticket-head" }, /* @__PURE__ */ React.createElement("span", { className: "ticket-player" }, player ? player.emoji + " " + player.name : "?"), /* @__PURE__ */ React.createElement("span", { className: "badge " + meta.cls }, meta.label)), /* @__PURE__ */ React.createElement("div", { className: "ticket-match" }, bet.label), Array.isArray(bet.selections) && bet.selections.length > 1 ? /* @__PURE__ */ React.createElement("ul", { className: "ticket-sel" }, bet.selections.map((s, i) => /* @__PURE__ */ React.createElement("li", { key: i }, /* @__PURE__ */ React.createElement("span", null, s.match || "\u2014"), /* @__PURE__ */ React.createElement("em", null, s.pick, s.cote ? " \xB7 " + (+s.cote).toFixed(2) : "")))) : bet.pick && /* @__PURE__ */ React.createElement("div", { className: "ticket-pick" }, "\u2192 ", bet.pick), bet.url && /* @__PURE__ */ React.createElement("a", { className: "stake-link", href: bet.url, target: "_blank", rel: "noopener noreferrer" }, "V\xE9rifier sur ", bet.book || bookFromUrl(bet.url), " \u2197"), bet.hasProof && /* @__PURE__ */ React.createElement("button", { className: "proof-btn", onClick: toggleProof, disabled: proofLoading }, proofLoading ? "Chargement\u2026" : proof ? "Masquer la capture" : "\u{1F4CE} Voir la capture du pari"), proof && /* @__PURE__ */ React.createElement("img", { className: "proof-img", src: proof, alt: "Capture du pari" }), /* @__PURE__ */ React.createElement("div", { className: "ticket-perf", "aria-hidden": "true" }), /* @__PURE__ */ React.createElement("div", { className: "ticket-nums" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("small", null, "Mise"), /* @__PURE__ */ React.createElement("strong", null, EUR(mise))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("small", null, "Cote"), /* @__PURE__ */ React.createElement("strong", null, cote.toLocaleString("fr-FR", { minimumFractionDigits: 2 }))), /* @__PURE__ */ React.createElement("div", { className: "right" }, statut === "en_cours" || statut === "rembourse" ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("small", null, "Gain potentiel"), /* @__PURE__ */ React.createElement("strong", null, EUR(gainPotentiel))) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("small", null, "R\xE9sultat"), /* @__PURE__ */ React.createElement("strong", { className: resultat > 0 ? "pos" : resultat < 0 ? "neg" : "" }, signEUR(resultat))))), mine && /* @__PURE__ */ React.createElement("div", { className: "ticket-actions" }, statut === "en_cours" ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "act won", onClick: () => onStatut(bet.id, "gagne") }, "\u2713 Gagn\xE9"), /* @__PURE__ */ React.createElement("button", { className: "act lost", onClick: () => onStatut(bet.id, "perdu") }, "\u2717 Perdu"), /* @__PURE__ */ React.createElement("button", { className: "act refund", onClick: () => onStatut(bet.id, "rembourse") }, "\u21A9 Remb."), confirmDel ? /* @__PURE__ */ React.createElement("button", { className: "act del confirm", onClick: () => onDelete(bet.id) }, "Confirmer ?") : /* @__PURE__ */ React.createElement("button", { className: "act del", onClick: () => setConfirmDel(true) }, "\u{1F5D1}")) : /* @__PURE__ */ React.createElement("button", { className: "act undo", onClick: () => onStatut(bet.id, "en_cours") }, "\u21BA Remettre en cours")));
+}
+function NewBet({ onSubmit, available = 0 }) {
+  const [mode, setMode] = useState("manuel");
+  const [market, setMarket] = useState("1n2");
+  const [team1, setTeam1] = useState("");
+  const [team2, setTeam2] = useState("");
+  const [choice, setChoice] = useState("");
+  const [sens, setSens] = useState("Plus");
+  const [seuil, setSeuil] = useState("2,5");
+  const [scoreA, setScoreA] = useState("");
+  const [scoreB, setScoreB] = useState("");
+  const [joueur, setJoueur] = useState("");
+  const [teamSolo, setTeamSolo] = useState("");
+  const [libre, setLibre] = useState("");
+  const [pick, setPick] = useState("");
+  const [cote, setCote] = useState("");
+  const [mise, setMise] = useState("");
+  const [stakeLink, setStakeLink] = useState("");
+  const [selections, setSelections] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [proofData, setProofData] = useState(null);
+  const [proofErr, setProofErr] = useState(null);
+  const [importText, setImportText] = useState("");
+  const [importErr, setImportErr] = useState(null);
+  const [importNote, setImportNote] = useState(null);
+  const MARKETS = [
+    ["1n2", "R\xE9sultat (1N2)"],
+    ["double", "Double chance"],
+    ["ou", "Plus/Moins de buts"],
+    ["btts", "Les 2 \xE9quipes marquent"],
+    ["score", "Score exact"],
+    ["buteur", "Buteur"],
+    ["qualif", "Qualification"],
+    ["vainqueur", "Vainqueur du tournoi"],
+    ["autre", "Autre pari"]
+  ];
+  const needsMatch = !["vainqueur", "autre"].includes(market);
+  function resetMarketFields() {
+    setChoice("");
+    setScoreA("");
+    setScoreB("");
+    setJoueur("");
+  }
+  async function onPickProof(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setProofErr(null);
+    try {
+      setProofData(await compressImage(file));
+    } catch (e2) {
+      setProofErr("Impossible de lire l'image, r\xE9essaie.");
+    }
+  }
+  function analyzeImport() {
+    setImportErr(null);
+    setImportNote(null);
+    const local = parseTicketCode(importText);
+    if (local && local.kind === "url") {
+      setStakeLink(local.url);
+      setImportText("");
+      setImportNote("Lien enregistr\xE9 \u2713 Compl\xE8te l'intitul\xE9, la cote et la mise.");
+      return;
+    }
+    if (local && local.kind === "code" && local.selections.length) {
+      setLibre(
+        local.selections.length > 1 ? `Combin\xE9 \xB7 ${local.selections.length} s\xE9lections` : local.selections[0].match || "Pari"
+      );
+      setPick(local.selections.map((sel) => sel.pick).filter(Boolean).join(" + "));
+      if (local.cote != null) setCote(String(local.cote).replace(".", ","));
+      if (local.mise != null) setMise(String(local.mise).replace(".", ","));
+      if (local.url) setStakeLink(local.url);
+      setSelections(local.selections);
+      setImportText("");
+      setImportNote("Ticket pr\xE9-rempli depuis le code, v\xE9rifie avant de valider \u2713");
+      return;
+    }
+    setImportErr("Non reconnu : colle un lien de pari complet (https://\u2026) ou un code ticket JSON.");
+  }
+  const sansDrapeau = (t) => t.replace(/^\S+\s/, "");
+  let label = "";
+  let pickFinal = "";
+  let marketOk = false;
+  if (mode === "manuel") {
+    if (needsMatch) {
+      label = team1 && team2 && team1 !== team2 ? `${team1} \u2014 ${team2}` : "";
+      const matchOk = !!label;
+      if (market === "1n2") {
+        pickFinal = choice === "nul" ? "Match nul" : choice ? "Victoire " + sansDrapeau(choice) : "";
+        marketOk = matchOk && !!choice;
+      } else if (market === "double") {
+        pickFinal = choice;
+        marketOk = matchOk && !!choice;
+      } else if (market === "ou") {
+        pickFinal = `${sens} de ${seuil} buts`;
+        marketOk = matchOk;
+      } else if (market === "btts") {
+        pickFinal = choice ? "Les 2 \xE9quipes marquent : " + choice : "";
+        marketOk = matchOk && !!choice;
+      } else if (market === "score") {
+        const a = parseInt(scoreA, 10), b = parseInt(scoreB, 10);
+        const ok = Number.isInteger(a) && Number.isInteger(b) && a >= 0 && b >= 0;
+        pickFinal = ok ? `Score exact ${a}-${b}` : "";
+        marketOk = matchOk && ok;
+      } else if (market === "buteur") {
+        pickFinal = joueur.trim() ? joueur.trim() + " buteur" : "";
+        marketOk = matchOk && !!joueur.trim();
+      } else if (market === "qualif") {
+        pickFinal = choice ? sansDrapeau(choice) + " qualifi\xE9(e)" : "";
+        marketOk = matchOk && !!choice;
+      }
+    } else if (market === "vainqueur") {
+      label = "Vainqueur CDM 2026";
+      pickFinal = teamSolo ? sansDrapeau(teamSolo) + " vainqueur" : "";
+      marketOk = !!teamSolo;
+    } else {
+      label = libre.trim();
+      pickFinal = pick.trim();
+      marketOk = label.length > 0 && pickFinal.length > 0;
+    }
+  } else {
+    label = libre.trim();
+    pickFinal = pick.trim();
+    marketOk = label.length > 0;
+  }
+  const coteN = parseFloat(String(cote).replace(",", "."));
+  const miseN = parseFloat(String(mise).replace(",", "."));
+  const numsOk = Number.isFinite(coteN) && coteN > 1 && Number.isFinite(miseN) && miseN > 0;
+  const overBankroll = Number.isFinite(miseN) && miseN > available + 1e-3;
+  const linkInfo = stakeLink.trim() ? parseLink(stakeLink) : null;
+  const valid = numsOk && marketOk && !overBankroll && (mode !== "lien" || !!linkInfo);
+  const gain = valid ? miseN * coteN : 0;
+  async function submit() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await onSubmit({
+        label,
+        pick: pickFinal,
+        cote: coteN,
+        mise: miseN,
+        mode,
+        url: mode === "lien" && linkInfo ? linkInfo.url : null,
+        iid: mode === "lien" && linkInfo ? linkInfo.iid : null,
+        book: mode === "lien" && linkInfo ? bookFromUrl(linkInfo.url) : null,
+        selections: mode === "lien" ? selections || null : null,
+        proof: mode === "manuel" ? proofData || null : null
+      });
+      setTeam1("");
+      setTeam2("");
+      setTeamSolo("");
+      setLibre("");
+      setPick("");
+      setCote("");
+      setMise("");
+      setStakeLink("");
+      setSelections(null);
+      setProofData(null);
+      setProofErr(null);
+      resetMarketFields();
+      setImportNote(null);
+    } finally {
+      setSaving(false);
+    }
+  }
+  const Chips = ({ options, value, onPick }) => /* @__PURE__ */ React.createElement("div", { className: "chip-row" }, options.map((o) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: o.value,
+      type: "button",
+      className: "chip" + (value === o.value ? " sel" : ""),
+      onClick: () => onPick(o.value)
+    },
+    o.label
+  )));
+  return /* @__PURE__ */ React.createElement("div", { className: "stack" }, /* @__PURE__ */ React.createElement("h2", { className: "section-title" }, "Nouveau ticket"), /* @__PURE__ */ React.createElement("div", { className: "filter-row" }, /* @__PURE__ */ React.createElement("button", { className: "chip" + (mode === "manuel" ? " sel" : ""), onClick: () => setMode("manuel") }, "\u270D\uFE0F Pari manuel"), /* @__PURE__ */ React.createElement("button", { className: "chip" + (mode === "lien" ? " sel" : ""), onClick: () => setMode("lien") }, "\u{1F517} Lien bookmaker")), mode === "manuel" && /* @__PURE__ */ React.createElement("div", { className: "form-card" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Type de pari"), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      value: market,
+      onChange: (e) => {
+        setMarket(e.target.value);
+        resetMarketFields();
+      }
+    },
+    MARKETS.map(([id, l]) => /* @__PURE__ */ React.createElement("option", { key: id, value: id }, l))
+  )), needsMatch && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "\xC9quipe 1"), /* @__PURE__ */ React.createElement(TeamSelect, { value: team1, onChange: setTeam1 })), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "\xC9quipe 2"), /* @__PURE__ */ React.createElement(TeamSelect, { value: team2, onChange: setTeam2, exclude: team1 }))), market === "1n2" && team1 && team2 && /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Mon pronostic"), /* @__PURE__ */ React.createElement(
+    Chips,
+    {
+      value: choice,
+      onPick: setChoice,
+      options: [
+        { value: team1, label: team1 },
+        { value: "nul", label: "Match nul" },
+        { value: team2, label: team2 }
+      ]
+    }
+  )), market === "double" && team1 && team2 && /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Mon pronostic"), /* @__PURE__ */ React.createElement(
+    Chips,
+    {
+      value: choice,
+      onPick: setChoice,
+      options: [
+        { value: `${sansDrapeau(team1)} ou nul`, label: `${team1} ou nul` },
+        { value: `${sansDrapeau(team2)} ou nul`, label: `${team2} ou nul` },
+        { value: `${sansDrapeau(team1)} ou ${sansDrapeau(team2)}`, label: "Pas de nul" }
+      ]
+    }
+  )), market === "ou" && /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Sens"), /* @__PURE__ */ React.createElement("select", { value: sens, onChange: (e) => setSens(e.target.value) }, /* @__PURE__ */ React.createElement("option", null, "Plus"), /* @__PURE__ */ React.createElement("option", null, "Moins"))), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Seuil de buts"), /* @__PURE__ */ React.createElement("select", { value: seuil, onChange: (e) => setSeuil(e.target.value) }, ["0,5", "1,5", "2,5", "3,5", "4,5", "5,5"].map((s) => /* @__PURE__ */ React.createElement("option", { key: s }, s))))), market === "btts" && /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Mon pronostic"), /* @__PURE__ */ React.createElement(
+    Chips,
+    {
+      value: choice,
+      onPick: setChoice,
+      options: [
+        { value: "Oui", label: "Oui" },
+        { value: "Non", label: "Non" }
+      ]
+    }
+  )), market === "score" && /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Buts \xE9quipe 1"), /* @__PURE__ */ React.createElement("input", { type: "number", inputMode: "numeric", min: "0", value: scoreA, placeholder: "2", onChange: (e) => setScoreA(e.target.value) })), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Buts \xE9quipe 2"), /* @__PURE__ */ React.createElement("input", { type: "number", inputMode: "numeric", min: "0", value: scoreB, placeholder: "1", onChange: (e) => setScoreB(e.target.value) }))), market === "buteur" && /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Joueur"), /* @__PURE__ */ React.createElement("input", { type: "text", value: joueur, placeholder: "Ex : Mbapp\xE9", onChange: (e) => setJoueur(e.target.value) })), market === "qualif" && team1 && team2 && /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "\xC9quipe qualifi\xE9e"), /* @__PURE__ */ React.createElement(
+    Chips,
+    {
+      value: choice,
+      onPick: setChoice,
+      options: [
+        { value: team1, label: team1 },
+        { value: team2, label: team2 }
+      ]
+    }
+  )), market === "vainqueur" && /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "\xC9quipe"), /* @__PURE__ */ React.createElement(TeamSelect, { value: teamSolo, onChange: setTeamSolo })), market === "autre" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Intitul\xE9 du pari"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      value: libre,
+      placeholder: "Ex : Meilleur buteur du tournoi",
+      onChange: (e) => setLibre(e.target.value)
+    }
+  )), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Mon pronostic"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      value: pick,
+      placeholder: 'Ex : "Mbapp\xE9", "Carton rouge dans le match"\u2026',
+      onChange: (e) => setPick(e.target.value)
+    }
+  ))), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Capture du pari ", /* @__PURE__ */ React.createElement("em", { className: "opt" }, "optionnel \xB7 sert de preuve aux copains")), /* @__PURE__ */ React.createElement("input", { type: "file", accept: "image/*", onChange: onPickProof }), proofData && /* @__PURE__ */ React.createElement("div", { className: "proof-preview" }, /* @__PURE__ */ React.createElement("img", { src: proofData, alt: "Capture du pari" }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "act del", onClick: () => setProofData(null) }, "\u2715 Retirer la capture")), proofErr && /* @__PURE__ */ React.createElement("small", { className: "form-hint warn" }, proofErr)), /* @__PURE__ */ React.createElement(CoteMise, { cote, setCote, mise, setMise, available, overBankroll }), /* @__PURE__ */ React.createElement(RecapGain, { label, pick: pickFinal, valid, gain }), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !valid || saving, onClick: submit }, saving ? "Enregistrement\u2026" : "Valider le ticket")), mode === "lien" && /* @__PURE__ */ React.createElement("div", { className: "form-card" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Lien du pari (Stake, Winamax, Betclic\u2026)"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "url",
+      value: stakeLink,
+      placeholder: "https://stake.com/sports/\u2026?iid=\u2026",
+      onChange: (e) => setStakeLink(e.target.value)
+    }
+  ), stakeLink.trim() && !linkInfo && /* @__PURE__ */ React.createElement("small", { className: "form-hint warn" }, "Lien invalide \u2014 colle l'URL compl\xE8te partag\xE9e depuis le bookmaker."), linkInfo && /* @__PURE__ */ React.createElement("small", { className: "form-hint ok" }, bookFromUrl(linkInfo.url), " reconnu \u2713", linkInfo.iid ? " \xB7 r\xE9f. " + linkInfo.iid : "")), /* @__PURE__ */ React.createElement("details", { className: "import-block" }, /* @__PURE__ */ React.createElement("summary", null, "\u{1F39F}\uFE0F Pr\xE9-remplir avec un lien ou un code ticket"), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Lien de pari ou code ticket JSON"), /* @__PURE__ */ React.createElement(
+    "textarea",
+    {
+      rows: 3,
+      value: importText,
+      placeholder: "Colle ici le lien partag\xE9 du pari ou le code ticket\u2026",
+      onChange: (e) => setImportText(e.target.value)
+    }
+  )), importErr && /* @__PURE__ */ React.createElement("p", { className: "import-msg err" }, importErr), /* @__PURE__ */ React.createElement("button", { className: "secondary", disabled: !importText.trim(), onClick: analyzeImport }, "Analyser")), importNote && /* @__PURE__ */ React.createElement("p", { className: "import-msg ok" }, importNote), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Intitul\xE9 du pari"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      value: libre,
+      placeholder: "Ex : Combin\xE9 3 matchs, France \u2014 S\xE9n\xE9gal\u2026",
+      onChange: (e) => setLibre(e.target.value)
+    }
+  )), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "D\xE9tail du pronostic ", /* @__PURE__ */ React.createElement("em", { className: "opt" }, "optionnel")), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      value: pick,
+      placeholder: 'Ex : "Victoire France + Plus de 2,5 buts"',
+      onChange: (e) => setPick(e.target.value)
+    }
+  )), /* @__PURE__ */ React.createElement(CoteMise, { cote, setCote, mise, setMise, available, overBankroll }), /* @__PURE__ */ React.createElement(RecapGain, { label, pick: pickFinal, valid, gain }), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !valid || saving, onClick: submit }, saving ? "Enregistrement\u2026" : "Valider le ticket")));
+}
+function CoteMise({ cote, setCote, mise, setMise, available = 0, overBankroll = false }) {
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Cote"), /* @__PURE__ */ React.createElement("input", { type: "text", inputMode: "decimal", value: cote, placeholder: "1,85", onChange: (e) => setCote(e.target.value) })), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Mise (\u20AC)"), /* @__PURE__ */ React.createElement("input", { type: "text", inputMode: "decimal", value: mise, placeholder: "10", onChange: (e) => setMise(e.target.value) }))), overBankroll ? /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "Mise sup\xE9rieure \xE0 ta bankroll disponible (", EUR(available), "). R\xE9duis la mise ou fais un red\xE9p\xF4t depuis l'onglet Stats.") : /* @__PURE__ */ React.createElement("small", { className: "muted" }, "Bankroll disponible : ", EUR(available)));
+}
+function RecapGain({ label, pick, valid, gain }) {
+  return /* @__PURE__ */ React.createElement("div", { className: "gain-preview" + (valid ? " on" : "") }, /* @__PURE__ */ React.createElement("div", { className: "gain-left" }, /* @__PURE__ */ React.createElement("span", null, "Gain potentiel"), valid && (label || pick) && /* @__PURE__ */ React.createElement("small", { className: "gain-recap" }, [label, pick].filter(Boolean).join(" \xB7 "))), /* @__PURE__ */ React.createElement("strong", null, valid ? EUR(gain) : "\u2014"));
+}
+function TeamSelect({ value, onChange, exclude }) {
+  return /* @__PURE__ */ React.createElement("select", { value, onChange: (e) => onChange(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Choisir\u2026"), Object.entries(GROUPES).map(([g, teams]) => /* @__PURE__ */ React.createElement("optgroup", { key: g, label: "Groupe " + g }, teams.map((t) => /* @__PURE__ */ React.createElement("option", { key: t, value: t, disabled: t === exclude }, t)))));
+}
+function StatsView({ players, betsByPlayer, statsFor, setStatsFor, me, onDeposit, onRestore, onDeletePlayer }) {
+  const list = Object.values(players);
+  const player = players[statsFor] || players[me];
+  const [showDeposit, setShowDeposit] = useState(false);
+  const [depAmount, setDepAmount] = useState("");
+  const [pendingRestore, setPendingRestore] = useState(null);
+  const [depBusy, setDepBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  function exportJSON() {
+    const blob = new Blob(
+      [JSON.stringify({ app: "PRONO", exportedAt: Date.now(), players, betsByPlayer }, null, 2)],
+      { type: "application/json" }
+    );
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "prono-cdm2026-sauvegarde.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+  async function onPickBackup(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      setPendingRestore({ name: file.name, data });
+    } catch (e2) {
+      setPendingRestore(null);
+    }
+  }
+  if (!player) return /* @__PURE__ */ React.createElement(Empty, { icon: "\u{1F4CA}", text: "Aucune donn\xE9e pour l'instant." });
+  const bets = betsByPlayer[player.id] || [];
+  const s = computeStats(player, bets);
+  const series = bankrollSeries(player, bets);
+  const isMe = player.id === me;
+  const depN = parseFloat(String(depAmount).replace(",", "."));
+  const depOk = Number.isFinite(depN) && depN > 0;
+  async function confirmDeposit() {
+    if (!depOk || depBusy) return;
+    setDepBusy(true);
+    try {
+      await onDeposit(depN);
+      setDepAmount("");
+      setShowDeposit(false);
+    } finally {
+      setDepBusy(false);
+    }
+  }
+  return /* @__PURE__ */ React.createElement("div", { className: "stack" }, /* @__PURE__ */ React.createElement("div", { className: "filter-row scroll" }, list.map((p) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: p.id,
+      className: "chip" + (p.id === player.id ? " sel" : ""),
+      onClick: () => setStatsFor(p.id)
+    },
+    p.emoji,
+    " ",
+    p.id === me ? "Moi" : p.name
+  ))), /* @__PURE__ */ React.createElement("div", { className: "stats-hero" }, /* @__PURE__ */ React.createElement("div", { className: "stats-name" }, player.emoji, " ", player.name), /* @__PURE__ */ React.createElement("div", { className: "stats-profit " + (s.rendement > 0 ? "pos" : s.rendement < 0 ? "neg" : "") }, (s.rendement > 0 ? "+" : "") + (s.rendement * 100).toFixed(1), " %"), /* @__PURE__ */ React.createElement("div", { className: "muted small" }, "rentabilit\xE9 \xB7 ", signEUR(s.profit), " net sur ", EUR(s.totalIn), " investis", s.redeposits > 0 && ` (d\xE9part ${EUR(+player.start || 0)} + ${EUR(s.redeposits)} red\xE9pos\xE9s)`)), isMe && /* @__PURE__ */ React.createElement("div", { className: "deposit-card" }, !showDeposit ? /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: () => setShowDeposit(true) }, "\u{1F4B0} Red\xE9poser des fonds") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Montant du red\xE9p\xF4t (\u20AC)"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      inputMode: "decimal",
+      value: depAmount,
+      placeholder: "30",
+      autoFocus: true,
+      onChange: (e) => setDepAmount(e.target.value)
+    }
+  )), /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "Le red\xE9p\xF4t augmente ta bankroll mais aussi ton total investi : ta rentabilit\xE9 % (et donc ton classement) en tiendra compte."), /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: () => {
+    setShowDeposit(false);
+    setDepAmount("");
+  } }, "Annuler"), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !depOk || depBusy, onClick: confirmDeposit }, depBusy ? "\u2026" : "Confirmer")))), isMe && /* @__PURE__ */ React.createElement("div", { className: "deposit-card" }, /* @__PURE__ */ React.createElement("div", { className: "backup-row" }, /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: exportJSON }, "\u{1F4BE} Exporter la comp\xE9t'"), /* @__PURE__ */ React.createElement("label", { className: "secondary file-btn" }, "\u{1F4C2} Importer", /* @__PURE__ */ React.createElement("input", { type: "file", accept: "application/json", hidden: true, onChange: onPickBackup }))), pendingRestore && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "Restaurer \xAB ", pendingRestore.name, " \xBB \xE9crasera les donn\xE9es actuelles des joueurs pr\xE9sents dans le fichier, pour tout le monde."), /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: () => setPendingRestore(null) }, "Annuler"), /* @__PURE__ */ React.createElement("button", { className: "primary", onClick: () => {
+    onRestore(pendingRestore.data);
+    setPendingRestore(null);
+  } }, "Restaurer")))), /* @__PURE__ */ React.createElement("div", { className: "stat-grid" }, /* @__PURE__ */ React.createElement(Stat, { label: "Bankroll dispo", value: EUR(s.bankroll), tone: s.bankroll < 0 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "En jeu", value: EUR(s.enJeu) }), /* @__PURE__ */ React.createElement(Stat, { label: "Total investi", value: EUR(s.totalIn) }), /* @__PURE__ */ React.createElement(Stat, { label: "Rendement", value: (s.rendement * 100).toFixed(1) + " %", tone: s.rendement > 0 ? "pos" : s.rendement < 0 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "ROI / mises", value: (s.roi * 100).toFixed(1) + " %", tone: s.roi > 0 ? "pos" : s.roi < 0 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "R\xE9ussite", value: s.wins + s.losses > 0 ? Math.round(s.winRate * 100) + " %" : "\u2014" }), /* @__PURE__ */ React.createElement(Stat, { label: "Bilan", value: `${s.wins}V \xB7 ${s.losses}D \xB7 ${s.refunds}R` }), /* @__PURE__ */ React.createElement(Stat, { label: "Cote moyenne", value: s.coteMoy > 0 ? s.coteMoy.toFixed(2) : "\u2014" }), /* @__PURE__ */ React.createElement(Stat, { label: "Tickets", value: String(s.total) })), series.length >= 2 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "chart-card" }, /* @__PURE__ */ React.createElement("div", { className: "chart-title" }, "Bankroll (\u20AC) \xB7 d\xE9part, d\xE9p\xF4ts et paris r\xE9gl\xE9s"), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 180 }, /* @__PURE__ */ React.createElement(LineChart, { data: series, margin: { top: 8, right: 8, bottom: 0, left: -10 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false, domain: ["auto", "auto"] }), /* @__PURE__ */ React.createElement(
+    Tooltip,
+    {
+      formatter: (v) => [EUR(v), "Bankroll"],
+      contentStyle: { background: "#0c2e1d", border: "1px solid #2c5a40", borderRadius: 10, color: "#f2f0e4" }
+    }
+  ), /* @__PURE__ */ React.createElement(ReferenceLine, { y: +player.start || 0, stroke: "#2c5a40", strokeDasharray: "4 4" }), /* @__PURE__ */ React.createElement(Line, { type: "monotone", dataKey: "bankroll", stroke: "#f5c543", strokeWidth: 2.5, dot: { r: 3, fill: "#f5c543" } })))), /* @__PURE__ */ React.createElement("div", { className: "chart-card" }, /* @__PURE__ */ React.createElement("div", { className: "chart-title" }, "Rendement (%) \xB7 b\xE9n\xE9fice \xF7 total investi"), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 180 }, /* @__PURE__ */ React.createElement(LineChart, { data: series, margin: { top: 8, right: 8, bottom: 0, left: -16 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false, domain: ["auto", "auto"] }), /* @__PURE__ */ React.createElement(
+    Tooltip,
+    {
+      formatter: (v) => [v.toLocaleString("fr-FR") + " %", "Rendement"],
+      contentStyle: { background: "#0c2e1d", border: "1px solid #2c5a40", borderRadius: 10, color: "#f2f0e4" }
+    }
+  ), /* @__PURE__ */ React.createElement(ReferenceLine, { y: 0, stroke: "#2c5a40", strokeDasharray: "4 4" }), /* @__PURE__ */ React.createElement(Line, { type: "monotone", dataKey: "rendement", stroke: "#5cc97a", strokeWidth: 2.5, dot: { r: 3, fill: "#5cc97a" } }))))), bets.length === 0 && /* @__PURE__ */ React.createElement(Empty, { icon: "\u{1F39F}\uFE0F", text: "Aucun ticket pour ce joueur." }), isMe && /* @__PURE__ */ React.createElement("div", { className: "deposit-card" }, !confirmDelete ? /* @__PURE__ */ React.createElement("button", { className: "secondary danger", onClick: () => setConfirmDelete(true) }, "\u{1F5D1} Supprimer mon compte") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "Supprimer d\xE9finitivement ton compte \xAB ", player.name, " \xBB", bets.length > 0 ? ` ainsi que tes ${bets.length} pari${bets.length > 1 ? "s" : ""}` : "", " ? Cette action est irr\xE9versible et te sortira du classement pour tout le groupe."), /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: () => setConfirmDelete(false) }, "Annuler"), /* @__PURE__ */ React.createElement("button", { className: "primary", onClick: () => {
+    onDeletePlayer(player.id);
+    setConfirmDelete(false);
+  } }, "Supprimer")))));
+}
+function Stat({ label, value, tone }) {
+  return /* @__PURE__ */ React.createElement("div", { className: "stat" }, /* @__PURE__ */ React.createElement("small", null, label), /* @__PURE__ */ React.createElement("strong", { className: tone || "" }, value));
+}
+function Empty({ icon, text }) {
+  return /* @__PURE__ */ React.createElement("div", { className: "empty" }, /* @__PURE__ */ React.createElement("div", { className: "empty-icon" }, icon), /* @__PURE__ */ React.createElement("p", null, text));
+}
+function Shell({ children }) {
+  return /* @__PURE__ */ React.createElement("div", { className: "app" }, /* @__PURE__ */ React.createElement("style", null, CSS), children);
+}
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+
+:root{
+  --pitch:#0b2f1e;
+  --pitch-2:#0f3b26;
+  --card:#123;
+  --line:#2c5a40;
+  --chalk:#f2f0e4;
+  --chalk-dim:#9fc1ab;
+  --gold:#f5c543;
+  --loss:#e5533c;
+  --won:#5cc97a;
+  --refund:#8fa6c9;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+.app{
+  min-height:100vh;
+  background:
+    radial-gradient(1200px 500px at 50% -200px, #15522f 0%, transparent 60%),
+    repeating-linear-gradient(180deg, var(--pitch) 0 64px, var(--pitch-2) 64px 128px);
+  color:var(--chalk);
+  font-family:'Inter',system-ui,sans-serif;
+  display:flex;flex-direction:column;
+  max-width:560px;margin:0 auto;
+}
+.brand{
+  font-family:'Saira Condensed',sans-serif;
+  font-weight:800;letter-spacing:.14em;
+  color:var(--chalk);line-height:1;
+}
+.brand.xl{font-size:52px;text-shadow:0 0 24px rgba(245,197,67,.25)}
+.logo-hero{display:block;width:min(250px,64%);height:auto;margin:0 auto;border-radius:18px;box-shadow:0 10px 36px rgba(0,0,0,.45)}
+.muted{color:var(--chalk-dim)}
+.small{font-size:12px}
+.center{text-align:center}
+.pos{color:var(--won)}
+.neg{color:var(--loss)}
+
+/* ---- Topbar ---- */
+.topbar{
+  position:sticky;top:0;z-index:20;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:calc(12px + env(safe-area-inset-top)) 16px 10px;
+  background:linear-gradient(180deg, rgba(11,47,30,.97) 70%, rgba(11,47,30,0));
+}
+.brand-row{display:flex;align-items:baseline;gap:10px}
+.brand-row .brand{font-size:26px}
+.brand-sub{font-size:11px;color:var(--chalk-dim);letter-spacing:.08em;text-transform:uppercase}
+.sync-btn{
+  display:flex;align-items:center;gap:6px;
+  background:transparent;border:1px solid var(--line);border-radius:999px;
+  color:var(--chalk-dim);padding:5px 12px;font-size:12px;cursor:pointer;
+}
+.ball-spin{display:inline-block;animation:spin 1.1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.ball-spin{animation:none}}
+
+/* ---- Layout ---- */
+.content{flex:1;padding:8px 16px 96px}
+.stack{display:flex;flex-direction:column;gap:12px}
+.section-title{
+  font-family:'Saira Condensed',sans-serif;font-weight:700;
+  font-size:20px;letter-spacing:.08em;text-transform:uppercase;
+  border-bottom:2px solid var(--line);padding-bottom:6px;
+}
+
+/* ---- Tabbar ---- */
+.tabbar{
+  position:fixed;bottom:0;left:0;right:0;z-index:30;
+  max-width:560px;margin:0 auto;
+  display:flex;
+  background:#081f14;border-top:2px solid var(--line);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.tab{
+  flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;
+  padding:10px 0 8px;background:transparent;border:none;color:var(--chalk-dim);
+  font-family:inherit;font-size:11px;cursor:pointer;
+}
+.tab.active{color:var(--gold)}
+.tab.cta .tab-icon{
+  background:var(--gold);color:#081f14;border-radius:50%;
+  width:26px;height:26px;display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:18px;
+}
+.tab-icon{font-size:18px;line-height:1}
+.tab:focus-visible{outline:2px solid var(--gold);outline-offset:-2px;border-radius:8px}
+
+/* ---- Inscription ---- */
+.join-wrap{padding:24px 16px 48px;display:flex;flex-direction:column;gap:20px}
+.join-hero{position:relative;text-align:center;padding:36px 8px 28px;overflow:hidden}
+.center-circle{
+  position:absolute;left:50%;top:-130px;transform:translateX(-50%);
+  width:340px;height:340px;border:2px solid rgba(242,240,228,.16);border-radius:50%;
+  pointer-events:none;
+}
+.hero-sub{margin-top:8px;color:var(--gold);font-size:13px;letter-spacing:.1em;text-transform:uppercase}
+.hero-line{margin-top:14px;color:var(--chalk-dim);font-size:14px}
+.join-card{
+  background:rgba(8,31,20,.75);border:1px solid var(--line);border-radius:18px;
+  padding:20px;display:flex;flex-direction:column;gap:16px;
+}
+.field{display:flex;flex-direction:column;gap:6px;font-size:13px}
+.field>span{color:var(--chalk-dim);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.06em}
+.field input,.field select,.field textarea{
+  background:#0a2718;border:1px solid var(--line);border-radius:10px;
+  color:var(--chalk);padding:12px;font-size:16px;font-family:inherit;width:100%;
+  resize:vertical;
+}
+.field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--gold);border-color:var(--gold)}
+.field input[type=file]{padding:9px;font-size:13px;color:var(--chalk-dim)}
+.import-msg{font-size:13px;border-radius:10px;padding:10px 12px}
+.import-msg.ok{background:rgba(92,201,122,.12);color:var(--won);border:1px solid rgba(92,201,122,.35)}
+.import-msg.err{background:rgba(229,83,60,.12);color:var(--loss);border:1px solid rgba(229,83,60,.35)}
+.emoji-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.emoji-btn{
+  font-size:22px;padding:8px 0;background:#0a2718;border:1px solid var(--line);
+  border-radius:10px;cursor:pointer;
+}
+.emoji-btn.sel{border-color:var(--gold);background:rgba(245,197,67,.12)}
+.primary{
+  background:var(--gold);color:#081f14;border:none;border-radius:12px;
+  padding:14px;font-size:16px;font-weight:700;font-family:inherit;cursor:pointer;
+}
+.primary:disabled{opacity:.4;cursor:not-allowed}
+
+/* ---- Classement ---- */
+.rank-card{
+  display:flex;align-items:center;gap:12px;width:100%;text-align:left;
+  background:rgba(8,31,20,.75);border:1px solid var(--line);border-radius:14px;
+  padding:12px 14px;color:var(--chalk);font-family:inherit;cursor:pointer;
+}
+.rank-pos{
+  font-family:'Saira Condensed',sans-serif;font-weight:800;font-size:20px;
+  width:30px;text-align:center;color:var(--chalk-dim);flex-shrink:0;
+}
+.rank-pos.gold{font-size:22px}
+.rank-avatar{font-size:24px;flex-shrink:0}
+.rank-main{flex:1;min-width:0}
+.rank-name{font-weight:700;font-size:15px;display:flex;align-items:center;gap:6px}
+.me-chip{font-size:10px;background:var(--line);border-radius:999px;padding:1px 7px;color:var(--chalk-dim)}
+.rank-meta{font-size:12px;color:var(--chalk-dim);margin-top:2px}
+.rank-right{text-align:right;flex-shrink:0}
+.rank-profit{font-family:'Saira Condensed',sans-serif;font-weight:800;font-size:19px;font-variant-numeric:tabular-nums}
+.rank-sub{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.rank-bankroll{font-size:11px;color:var(--chalk-dim)}
+.redep-chip{margin-left:6px;font-size:10px;background:rgba(245,197,67,.15);color:var(--gold);border-radius:999px;padding:1px 7px}
+.deposit-card{
+  background:rgba(8,31,20,.75);border:1px solid var(--line);border-radius:14px;
+  padding:14px;display:flex;flex-direction:column;gap:12px;
+}
+.backup-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.file-btn{display:flex;align-items:center;justify-content:center;text-align:center}
+.activity-card{
+  background:rgba(8,31,20,.75);border:1px solid var(--line);border-radius:14px;
+  padding:10px 14px;display:flex;flex-direction:column;gap:6px;
+}
+.activity-line{font-size:12.5px;color:var(--chalk-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.activity-line:first-child{color:var(--chalk);font-weight:600}
+.legend-row{display:flex;flex-wrap:wrap;gap:10px;padding:8px 6px 6px}
+.legend-item{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--chalk-dim)}
+.legend-item i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.awards-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.award{
+  background:rgba(8,31,20,.75);border:1px solid var(--line);border-radius:14px;
+  padding:12px;display:flex;gap:10px;align-items:flex-start;
+}
+.award-icon{font-size:22px}
+.award-title{font-family:'Saira Condensed',sans-serif;font-weight:700;font-size:15px;letter-spacing:.04em;text-transform:uppercase;color:var(--gold)}
+.award-who{font-size:13px;font-weight:600;margin-top:2px}
+.award-detail{font-size:11px;color:var(--chalk-dim);margin-top:1px}
+
+/* ---- Tickets ---- */
+.filter-row{display:flex;gap:8px;flex-wrap:wrap}
+.filter-row.scroll{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}
+.chip{
+  background:transparent;border:1px solid var(--line);border-radius:999px;
+  color:var(--chalk-dim);padding:7px 14px;font-size:13px;font-family:inherit;
+  cursor:pointer;white-space:nowrap;
+}
+.chip.sel{background:var(--gold);border-color:var(--gold);color:#081f14;font-weight:700}
+
+.ticket{
+  position:relative;background:#f7f4e8;color:#13231a;border-radius:14px;
+  padding:14px 16px 12px;overflow:hidden;
+}
+.ticket::before,.ticket::after{
+  content:"";position:absolute;width:18px;height:18px;border-radius:50%;
+  background:var(--pitch);top:calc(50% + 14px);
+}
+.ticket::before{left:-9px}
+.ticket::after{right:-9px}
+.ticket-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.ticket-player{font-weight:700;font-size:13px}
+.badge{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;border-radius:999px;padding:3px 9px}
+.badge.pending{background:#e7e2cd;color:#5a5a44}
+.badge.won{background:#d6f2de;color:#1c7a3d}
+.badge.lost{background:#fadcd6;color:#b2392a}
+.badge.refund{background:#dde6f4;color:#3d5a8a}
+.ticket-match{font-family:'Saira Condensed',sans-serif;font-weight:700;font-size:18px;line-height:1.2}
+.ticket-pick{font-size:13px;margin-top:3px;color:#3c4f42;font-weight:600}
+.ticket-sel{list-style:none;margin-top:6px;display:flex;flex-direction:column;gap:4px}
+.ticket-sel li{display:flex;justify-content:space-between;gap:10px;font-size:13px}
+.ticket-sel li span{color:#13231a}
+.ticket-sel li em{font-style:normal;color:#3c4f42;font-weight:600;text-align:right;white-space:nowrap}
+.stake-link{display:inline-block;margin-top:8px;font-size:12px;font-weight:700;color:#1c5a8a;text-decoration:none;border-bottom:1px dashed #1c5a8a}
+.proof-btn{display:block;margin-top:8px;background:none;border:none;padding:0;font-size:12px;font-weight:700;color:#1c5a8a;border-bottom:1px dashed #1c5a8a;cursor:pointer;font-family:inherit}
+.proof-img{width:100%;border-radius:10px;margin-top:8px;border:1px solid #cfc9ad;display:block}
+.proof-preview{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.proof-preview img{width:100%;border-radius:10px;border:1px solid var(--line)}
+.proof-preview .act.del{align-self:flex-start;margin-left:0}
+.field .opt{font-style:normal;color:var(--chalk-dim);font-weight:400;text-transform:none;letter-spacing:0}
+.form-hint{font-size:12px}
+.form-hint.warn{color:#f0a18f}
+.form-hint.ok{color:var(--won)}
+.chip-row{display:flex;gap:8px;flex-wrap:wrap}
+.secondary{
+  background:transparent;border:1px solid var(--gold);color:var(--gold);
+  border-radius:12px;padding:11px;font-size:14px;font-weight:700;font-family:inherit;cursor:pointer;
+}
+.secondary:disabled{opacity:.4;cursor:not-allowed}
+.secondary.danger{border-color:var(--loss);color:var(--loss)}
+.import-block{border:1px dashed var(--line);border-radius:12px;padding:10px 12px}
+.import-block[open]{display:flex;flex-direction:column;gap:12px}
+.import-block summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--chalk-dim);list-style:none}
+.import-block summary::-webkit-details-marker{display:none}
+.gain-left{display:flex;flex-direction:column;gap:2px;min-width:0}
+.gain-recap{font-size:11px;color:var(--chalk-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+.ticket-perf{border-top:2px dashed #cfc9ad;margin:12px -16px 10px}
+.ticket-nums{display:flex;gap:18px;align-items:flex-end}
+.ticket-nums>div{display:flex;flex-direction:column}
+.ticket-nums small{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#7a7a60}
+.ticket-nums strong{font-size:16px;font-variant-numeric:tabular-nums}
+.ticket-nums .right{margin-left:auto;text-align:right}
+.ticket-nums .pos{color:#1c7a3d}
+.ticket-nums .neg{color:#b2392a}
+.ticket.won{box-shadow:inset 4px 0 0 #2f9e57}
+.ticket.lost{box-shadow:inset 4px 0 0 #d4503c;opacity:.92}
+.ticket.refund{box-shadow:inset 4px 0 0 #6d87b5}
+.ticket-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.act{
+  border:none;border-radius:9px;padding:8px 12px;font-size:13px;font-weight:700;
+  font-family:inherit;cursor:pointer;
+}
+.act.won{background:#d6f2de;color:#1c7a3d}
+.act.lost{background:#fadcd6;color:#b2392a}
+.act.refund{background:#dde6f4;color:#3d5a8a}
+.act.del{background:#eee9d6;color:#7a7a60;margin-left:auto}
+.act.del.confirm{background:#b2392a;color:#fff}
+.act.undo{background:#e7e2cd;color:#5a5a44}
+
+/* ---- Formulaire ---- */
+.form-card{
+  background:rgba(8,31,20,.75);border:1px solid var(--line);border-radius:18px;
+  padding:18px;display:flex;flex-direction:column;gap:14px;
+}
+.two-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.gain-preview{
+  display:flex;justify-content:space-between;align-items:center;
+  border:1px dashed var(--line);border-radius:12px;padding:12px 14px;
+  color:var(--chalk-dim);font-size:13px;
+}
+.gain-preview strong{font-family:'Saira Condensed',sans-serif;font-size:20px;color:var(--chalk-dim)}
+.gain-preview.on strong{color:var(--gold)}
+
+/* ---- Stats ---- */
+.stats-hero{text-align:center;padding:10px 0 4px}
+.stats-name{font-weight:700;font-size:16px}
+.stats-profit{
+  font-family:'Saira Condensed',sans-serif;font-weight:800;font-size:44px;
+  line-height:1.1;font-variant-numeric:tabular-nums;
+}
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.stat{
+  background:rgba(8,31,20,.75);border:1px solid var(--line);border-radius:12px;
+  padding:10px 12px;display:flex;flex-direction:column;gap:3px;
+}
+.stat small{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--chalk-dim)}
+.stat strong{font-size:15px;font-variant-numeric:tabular-nums}
+.chart-card{
+  background:rgba(8,31,20,.75);border:1px solid var(--line);border-radius:14px;
+  padding:14px 10px 6px;
+}
+.chart-title{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--chalk-dim);padding:0 6px 8px}
+
+/* ---- Divers ---- */
+.empty{text-align:center;padding:42px 16px;color:var(--chalk-dim)}
+.empty-icon{font-size:38px;margin-bottom:10px}
+.loading-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:70vh;font-size:30px}
+.toast{
+  position:fixed;bottom:84px;left:50%;transform:translateX(-50%);
+  background:var(--gold);color:#081f14;font-weight:700;font-size:14px;
+  border-radius:999px;padding:10px 20px;z-index:50;box-shadow:0 6px 20px rgba(0,0,0,.35);
+}
+@media(min-width:560px){
+  .stat-grid{grid-template-columns:repeat(3,1fr)}
+}
+`;
+const rootEl = document.getElementById("root");
+ReactDOM.createRoot(rootEl).render(React.createElement(App));
+
+  </script>
+
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js"));
+    }
+  </script>
+</body>
+</html>
