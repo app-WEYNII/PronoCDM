@@ -12,6 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="PRONO" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <style>html,body{margin:0;background:#0b2f1e}</style>
 </head>
 <body>
@@ -23,6 +24,7 @@
   <script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 
   <script>
     /* ⚙️ Configuration Firebase du projet Prono-CDM2026 */
@@ -38,6 +40,10 @@
   </script>
 
   <script>
+if (!window.React || !window.ReactDOM || !window.Recharts || !window.firebase || !window.firebase.auth || !window.firebase.database) {
+  document.getElementById("root").innerHTML = '<div style="min-height:80vh;display:flex;align-items:center;justify-content:center;padding:32px;text-align:center;color:#f2f0e4;font-family:system-ui,sans-serif;font-size:15px;line-height:1.5">Impossible de charger les librairies de l\u2019app (probl\xE8me de connexion ou CDN indisponible).<br/>V\xE9rifie ta connexion puis recharge la page.</div>';
+  throw new Error("CDN load failure");
+}
 const { useState, useEffect, useRef, useCallback } = React;
 const { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } = Recharts;
 const GROUPES = {
@@ -65,6 +71,19 @@ const fb = (() => {
     return null;
   }
 })();
+const ensureAuth = (() => {
+  let p = null;
+  return () => {
+    if (!fb) return Promise.resolve(false);
+    if (!p) {
+      p = firebase.auth().signInAnonymously().then(() => true).catch(() => {
+        p = null;
+        return false;
+      });
+    }
+    return p;
+  };
+})();
 const keyToPath = (key) => key.replace(/:/g, "/");
 const store = {
   available: !!fb,
@@ -78,6 +97,7 @@ const store = {
       }
     }
     try {
+      await ensureAuth();
       const snap = await fb.ref(keyToPath(key)).get();
       return snap.exists() ? snap.val() : null;
     } catch (e) {
@@ -94,6 +114,7 @@ const store = {
       }
     }
     try {
+      await ensureAuth();
       await fb.ref(keyToPath(key)).set(value);
       return true;
     } catch (e) {
@@ -110,6 +131,7 @@ const store = {
       }
     }
     try {
+      await ensureAuth();
       await fb.ref(keyToPath(key)).remove();
       return true;
     } catch (e) {
@@ -136,20 +158,24 @@ function computeStats(player, bets) {
     const mise = +b.mise || 0;
     const cote = +b.cote || 0;
     const fun = b.categorie === "fun";
-    if (cote > 0) {
-      cotesSum += cote;
-      cotesN++;
-    }
     if (b.statut === "gagne") {
       settledProfit += betProfit(b);
       wins++;
       if (!fun) winsBase++;
       stakedSettled += mise;
+      if (cote > 0) {
+        cotesSum += cote;
+        cotesN++;
+      }
     } else if (b.statut === "perdu") {
       settledProfit += betProfit(b);
       losses++;
       if (!fun) lossesBase++;
       stakedSettled += mise;
+      if (cote > 0) {
+        cotesSum += cote;
+        cotesN++;
+      }
     } else if (b.statut === "rembourse") {
       refunds++;
     } else {
@@ -282,7 +308,10 @@ function buildAwards(players, betsByPlayer) {
     const bets = betsByPlayer[p.id] || [];
     for (const b of bets) {
       const cote = +b.cote || 0, mise = +b.mise || 0;
-      if (b.statut === "gagne" && (!sniper || cote > sniper.v)) sniper = { p, v: cote };
+      if (b.statut === "gagne") {
+        const coteEff = b.payout != null && mise > 0 ? +b.payout / mise : cote;
+        if (coteEff > 0 && (!sniper || coteEff > sniper.v)) sniper = { p, v: coteEff };
+      }
       if (mise > 0 && (!kamikaze || mise > kamikaze.v)) kamikaze = { p, v: mise };
     }
     const red = (p.deposits || []).reduce((sum, d) => sum + (+d.amount || 0), 0);
@@ -324,6 +353,17 @@ function compressImage(file, maxDim = 900, quality = 0.6) {
     };
     img.src = url;
   });
+}
+function pushNotif(title, body) {
+  try {
+    new Notification(title, { body, icon: "./favicon-32.png" });
+  } catch (e) {
+    if (navigator.serviceWorker) {
+      navigator.serviceWorker.getRegistration().then((reg) => {
+        if (reg) reg.showNotification(title, { body, icon: "./favicon-32.png" });
+      }).catch(() => {});
+    }
+  }
 }
 const STATUT_META = {
   en_cours: { label: "En cours", cls: "pending" },
@@ -400,18 +440,103 @@ function App() {
   const [statsFor, setStatsFor] = useState(null);
   const toastTimer = useRef(null);
   const joiningRef = useRef(false);
+  const [notifsOn, setNotifsOn] = useState(() => {
+    try {
+      return localStorage.getItem("prono.notifs") === "1" && typeof Notification !== "undefined" && Notification.permission === "granted";
+    } catch (e) {
+      return false;
+    }
+  });
+  const playersRef = useRef({});
+  const meRef = useRef(null);
+  const notifRef = useRef(false);
+  const prevBetsRef = useRef(null);
+  useEffect(() => {
+    meRef.current = me;
+  }, [me]);
+  useEffect(() => {
+    playersRef.current = players;
+  }, [players]);
+  useEffect(() => {
+    notifRef.current = notifsOn;
+  }, [notifsOn]);
   const showToast = (msg) => {
     setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   };
+  function notifyChanges(next) {
+    const prev = prevBetsRef.current;
+    const flat = {};
+    for (const [pid, bets] of Object.entries(next)) {
+      for (const bet of bets) {
+        if (bet && bet.id) flat[pid + ":" + bet.id] = { pid, bet };
+      }
+    }
+    if (prev) {
+      for (const [key, { pid, bet }] of Object.entries(flat)) {
+        if (pid === meRef.current) continue;
+        const st = bet.statut || "en_cours";
+        const old = prev[key];
+        const p = playersRef.current[pid];
+        const name = p ? p.emoji + " " + p.name : "Un joueur";
+        let title = null, body = null;
+        if (!old && st === "en_cours") {
+          title = "\u{1F39F}\uFE0F Nouveau ticket";
+          body = `${name} a mis\xE9 ${EUR(+bet.mise || 0)} sur \xAB ${bet.label} \xBB @ ${(+bet.cote || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2 })}`;
+        } else if (old && old !== st && st === "gagne") {
+          title = "\u{1F525} Pari gagn\xE9";
+          body = `${name} remporte \xAB ${bet.label} \xBB (${signEUR(betProfit(bet))})`;
+        } else if (old && old !== st && st === "perdu") {
+          title = "\u{1F480} Pari perdu";
+          body = `${name} a perdu \xAB ${bet.label} \xBB (${signEUR(betProfit(bet))})`;
+        }
+        if (title && notifRef.current) {
+          if (document.visibilityState === "visible") showToast(body);
+          else pushNotif(title, body);
+        }
+      }
+    }
+    const snap = {};
+    for (const [key, { bet }] of Object.entries(flat)) snap[key] = bet.statut || "en_cours";
+    prevBetsRef.current = snap;
+  }
+  async function toggleNotifs() {
+    if (notifsOn) {
+      setNotifsOn(false);
+      try {
+        localStorage.setItem("prono.notifs", "0");
+      } catch (e) {}
+      showToast("Notifications coup\xE9es \u{1F515}");
+      return;
+    }
+    if (typeof Notification === "undefined") {
+      showToast("Notifications non support\xE9es ici (sur iPhone : ajoute l'app \xE0 l'\xE9cran d'accueil)");
+      return;
+    }
+    let perm = Notification.permission;
+    if (perm === "default") perm = await Notification.requestPermission();
+    if (perm !== "granted") {
+      showToast("Autorise les notifications dans les r\xE9glages du navigateur");
+      return;
+    }
+    setNotifsOn(true);
+    try {
+      localStorage.setItem("prono.notifs", "1");
+    } catch (e) {}
+    showToast("Notifications activ\xE9es \u{1F514}");
+  }
   const loadAll = useCallback(async () => {
     setSyncing(true);
     try {
       const p = await store.get("players", true) || {};
       const rawB = await store.get("bets", true) || {};
       const b = {};
-      for (const [id, arr] of Object.entries(rawB)) b[id] = Array.isArray(arr) ? arr : Object.values(arr || {});
+      for (const [id, arr] of Object.entries(rawB)) {
+        const list = (Array.isArray(arr) ? arr : Object.values(arr || {})).filter(Boolean);
+        list.sort((x, y) => (y.createdAt || 0) - (x.createdAt || 0));
+        b[id] = list;
+      }
       setPlayers(p && typeof p === "object" ? p : {});
       setBetsByPlayer(b);
       setLastSync(/* @__PURE__ */ new Date());
@@ -424,24 +549,34 @@ function App() {
       setPhase("nostorage");
       return;
     }
-    const offPlayers = store.subscribe("players", (val) => {
-      setPlayers(val && typeof val === "object" ? val : {});
-      setLastSync(/* @__PURE__ */ new Date());
-      setPhase((ph) => ph === "loading" ? "decide" : ph);
-    });
-    const offBets = store.subscribe("bets", (val) => {
-      const b = {};
-      for (const [id, arr] of Object.entries(val || {})) b[id] = Array.isArray(arr) ? arr : Object.values(arr || {});
-      setBetsByPlayer(b);
-      setLastSync(/* @__PURE__ */ new Date());
-    });
-    const offReactions = store.subscribe("reactions", (val) => {
-      setReactions(val && typeof val === "object" ? val : {});
-    });
+    let cancelled = false;
+    const offs = [];
+    (async () => {
+      await ensureAuth();
+      if (cancelled) return;
+      offs.push(store.subscribe("players", (val) => {
+        setPlayers(val && typeof val === "object" ? val : {});
+        setLastSync(/* @__PURE__ */ new Date());
+        setPhase((ph) => ph === "loading" ? "decide" : ph);
+      }));
+      offs.push(store.subscribe("bets", (val) => {
+        const b = {};
+        for (const [id, arr] of Object.entries(val || {})) {
+          const list = (Array.isArray(arr) ? arr : Object.values(arr || {})).filter(Boolean);
+          list.sort((x, y) => (y.createdAt || 0) - (x.createdAt || 0));
+          b[id] = list;
+        }
+        notifyChanges(b);
+        setBetsByPlayer(b);
+        setLastSync(/* @__PURE__ */ new Date());
+      }));
+      offs.push(store.subscribe("reactions", (val) => {
+        setReactions(val && typeof val === "object" ? val : {});
+      }));
+    })();
     return () => {
-      offPlayers();
-      offBets();
-      offReactions();
+      cancelled = true;
+      offs.forEach((f) => f());
     };
   }, []);
   useEffect(() => {
@@ -457,6 +592,22 @@ function App() {
       }
     })();
   }, [phase]);
+  useEffect(() => {
+    if (phase !== "loading") return;
+    const t = setTimeout(() => setPhase((ph) => ph === "loading" ? "offline" : ph), 1e4);
+    return () => clearTimeout(t);
+  }, [phase]);
+  useEffect(() => {
+    if (phase !== "app" || !me) return;
+    (async () => {
+      const raw = await store.get("bets:" + me, true);
+      if (Array.isArray(raw)) {
+        const obj = {};
+        for (const b of raw) if (b && b.id) obj[b.id] = b;
+        await store.set("bets:" + me, obj, true);
+      }
+    })();
+  }, [phase, me]);
   useEffect(() => {
     if (phase !== "app" || !me) return;
     if (Object.keys(players).length > 0 && !players[me]) {
@@ -476,14 +627,14 @@ function App() {
         showToast("Ce pseudo est d\xE9j\xE0 pris");
         return;
       }
-      const id = clean.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12) + "-" + uid().slice(0, 4);
+      const slug = clean.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12);
+      const id = (slug || "joueur") + "-" + uid().slice(0, 4);
       const player = { id, name: clean, emoji, start: +start, deposits: [], createdAt: Date.now() };
       const ok = await store.set("players:" + id, player, true);
       if (!ok) {
         showToast("\xC9chec d'enregistrement, r\xE9essaie");
         return;
       }
-      await store.set("bets:" + id, [], true);
       await store.set("me", { playerId: id }, false);
       setMe(id);
       setStatsFor(id);
@@ -499,12 +650,21 @@ function App() {
       showToast("Tu ne peux supprimer que ton propre compte");
       return;
     }
-    for (const b of betsByPlayer[pid] || []) {
-      if (b.hasProof) await store.delete("proofs:" + b.id, true);
-      await store.delete("reactions:" + b.id, true);
+    try {
+      for (const b of betsByPlayer[pid] || []) {
+        if (b.hasProof) await store.delete("proofs:" + b.id, true);
+        await store.delete("reactions:" + b.id, true);
+      }
+      for (const [betId, who] of Object.entries(reactions)) {
+        if (who && who[pid] != null) await store.delete(`reactions:${betId}:${pid}`, true);
+      }
+      const okBets = await store.delete("bets:" + pid, true);
+      const okPlayer = await store.delete("players:" + pid, true);
+      if (!okBets || !okPlayer) throw new Error("delete failed");
+    } catch (e) {
+      showToast("Suppression incompl\xE8te, v\xE9rifie ta connexion et r\xE9essaie");
+      return;
     }
-    await store.delete("bets:" + pid, true);
-    await store.delete("players:" + pid, true);
     await store.delete("me", false);
     setPlayers((prev) => {
       const n = { ...prev };
@@ -536,15 +696,6 @@ function App() {
     setPlayers((prev) => ({ ...prev, [me]: next }));
     showToast(`Red\xE9p\xF4t de ${EUR(+amount)} effectu\xE9 \u{1F4B0}`);
   }
-  async function saveMyBets(next) {
-    const ok = await store.set("bets:" + me, next, true);
-    if (!ok) {
-      showToast("\xC9chec de sauvegarde, r\xE9essaie");
-      return false;
-    }
-    setBetsByPlayer((prev) => ({ ...prev, [me]: next }));
-    return true;
-  }
   async function addBet(bet) {
     const mine = betsByPlayer[me] || [];
     if (bet.iid && mine.some((b) => b.iid === bet.iid) || bet.url && mine.some((b) => b.url === bet.url)) {
@@ -554,28 +705,33 @@ function App() {
     const id = uid();
     const { proof, ...rest } = bet;
     if (proof) await store.set("proofs:" + id, proof, true);
-    const ok = await saveMyBets([
-      { ...rest, hasProof: !!proof, id, createdAt: Date.now(), statut: "en_cours" },
-      ...mine
-    ]);
-    if (ok) {
-      showToast("Ticket enregistr\xE9 \u{1F39F}\uFE0F");
-      setTab("paris");
-    } else if (proof) {
-      await store.delete("proofs:" + id, true);
+    const newBet = { ...rest, hasProof: !!proof, id, createdAt: Date.now(), statut: "en_cours" };
+    const ok = await store.set("bets:" + me + ":" + id, newBet, true);
+    if (!ok) {
+      showToast("\xC9chec de sauvegarde, r\xE9essaie");
+      if (proof) await store.delete("proofs:" + id, true);
+      return;
     }
+    setBetsByPlayer((prev) => ({ ...prev, [me]: [newBet, ...prev[me] || []] }));
+    showToast("Ticket enregistr\xE9 \u{1F39F}\uFE0F");
+    setTab("paris");
   }
   async function setBetStatut(betId, statut, payout) {
     const mine = betsByPlayer[me] || [];
-    const next = mine.map(
-      (b) => b.id === betId ? {
-        ...b,
-        statut,
-        payout: statut === "gagne" && payout != null ? +payout : null,
-        settledAt: statut === "en_cours" ? null : Date.now()
-      } : b
-    );
-    await saveMyBets(next);
+    const target = mine.find((b) => b.id === betId);
+    if (!target) return;
+    const updated = {
+      ...target,
+      statut,
+      payout: statut === "gagne" && payout != null ? +payout : null,
+      settledAt: statut === "en_cours" ? null : Date.now()
+    };
+    const ok = await store.set("bets:" + me + ":" + betId, updated, true);
+    if (!ok) {
+      showToast("\xC9chec de sauvegarde, r\xE9essaie");
+      return;
+    }
+    setBetsByPlayer((prev) => ({ ...prev, [me]: (prev[me] || []).map((b) => b.id === betId ? updated : b) }));
   }
   async function toggleReaction(betId, emoji) {
     if (!me) return;
@@ -591,7 +747,12 @@ function App() {
     const target = mine.find((b) => b.id === betId);
     if (target && target.hasProof) await store.delete("proofs:" + betId, true);
     await store.delete("reactions:" + betId, true);
-    await saveMyBets(mine.filter((b) => b.id !== betId));
+    const ok = await store.delete("bets:" + me + ":" + betId, true);
+    if (!ok) {
+      showToast("\xC9chec de suppression, r\xE9essaie");
+      return;
+    }
+    setBetsByPlayer((prev) => ({ ...prev, [me]: (prev[me] || []).filter((b) => b.id !== betId) }));
     showToast("Ticket supprim\xE9");
   }
   async function restoreBackup(obj) {
@@ -600,13 +761,30 @@ function App() {
       return;
     }
     for (const [id, p] of Object.entries(obj.players)) await store.set("players:" + id, p, true);
-    for (const [id, bets] of Object.entries(obj.betsByPlayer))
-      await store.set("bets:" + id, Array.isArray(bets) ? bets : [], true);
+    for (const [id, bets] of Object.entries(obj.betsByPlayer)) {
+      const list = (Array.isArray(bets) ? bets : Object.values(bets || {})).filter((b) => b && b.id);
+      const node = {};
+      for (const b of list) {
+        const keepProof = !obj.proofs ? !!b.hasProof : !!(b.hasProof && obj.proofs[b.id]);
+        node[b.id] = { ...b, hasProof: keepProof };
+      }
+      await store.set("bets:" + id, node, true);
+    }
+    if (obj.proofs && typeof obj.proofs === "object") {
+      for (const [id, img] of Object.entries(obj.proofs)) {
+        if (typeof img === "string") await store.set("proofs:" + id, img, true);
+      }
+    }
+    if (obj.reactions && typeof obj.reactions === "object") {
+      for (const [id, r] of Object.entries(obj.reactions)) await store.set("reactions:" + id, r, true);
+    }
     await loadAll();
     showToast("Sauvegarde restaur\xE9e \u2713");
   }
   if (phase === "nostorage")
     return /* @__PURE__ */ React.createElement(Shell, null, /* @__PURE__ */ React.createElement("div", { className: "join-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "join-card" }, /* @__PURE__ */ React.createElement("h1", { className: "brand" }, "PRONO"), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Configuration Firebase manquante ou invalide. Ouvre ", /* @__PURE__ */ React.createElement("code", null, "index.html"), " et remplace le bloc ", /* @__PURE__ */ React.createElement("code", null, "window.FIREBASE_CONFIG"), " par la configuration de ton projet Firebase (voir README.md)."))));
+  if (phase === "offline")
+    return /* @__PURE__ */ React.createElement(Shell, null, /* @__PURE__ */ React.createElement("div", { className: "join-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "join-card" }, /* @__PURE__ */ React.createElement("h1", { className: "brand" }, "PRONO"), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "Impossible de joindre le serveur. V\xE9rifie ta connexion internet (et, si tu es l'admin, que l'authentification anonyme est bien activ\xE9e dans Firebase), puis r\xE9essaie."), /* @__PURE__ */ React.createElement("button", { className: "primary", onClick: () => window.location.reload() }, "Recharger"))));
   if (phase === "loading")
     return /* @__PURE__ */ React.createElement(Shell, null, /* @__PURE__ */ React.createElement("div", { className: "loading-screen" }, /* @__PURE__ */ React.createElement("div", { className: "ball-spin" }, "\u26BD"), /* @__PURE__ */ React.createElement("p", { className: "muted" }, "\xC9chauffement\u2026")));
   if (phase === "join")
@@ -615,7 +793,7 @@ function App() {
       {
         onJoin: joinAs,
         nbPlayers: Object.keys(players).length,
-        takenNames: Object.values(players).map((p) => p.name.trim().toLowerCase())
+        takenNames: Object.values(players).map((p) => (p.name || "").trim().toLowerCase())
       }
     ));
   const allBets = Object.entries(betsByPlayer).flatMap(([pid, bets]) => bets.map((b) => ({ ...b, playerId: pid }))).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -627,7 +805,7 @@ function App() {
   const comparison = buildComparison(players, betsByPlayer);
   const comparisonPct = buildComparisonPct(players, betsByPlayer);
   const awards = buildAwards(players, betsByPlayer);
-  return /* @__PURE__ */ React.createElement(Shell, null, /* @__PURE__ */ React.createElement("header", { className: "topbar" }, /* @__PURE__ */ React.createElement("div", { className: "brand-row" }, /* @__PURE__ */ React.createElement("h1", { className: "brand" }, "PRONO"), /* @__PURE__ */ React.createElement("span", { className: "brand-sub" }, "CDM 2026 \xB7 entre amis")), /* @__PURE__ */ React.createElement("button", { className: "sync-btn", onClick: loadAll, "aria-label": "Actualiser" }, /* @__PURE__ */ React.createElement("span", { className: syncing ? "ball-spin" : "" }, "\u26BD"), /* @__PURE__ */ React.createElement("span", { className: "sync-time" }, syncing ? "sync\u2026" : lastSync ? lastSync.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "\u2014"))), /* @__PURE__ */ React.createElement("main", { className: "content" }, tab === "classement" && /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement(Shell, null, /* @__PURE__ */ React.createElement("header", { className: "topbar" }, /* @__PURE__ */ React.createElement("div", { className: "brand-row" }, /* @__PURE__ */ React.createElement("h1", { className: "brand" }, "PRONO"), /* @__PURE__ */ React.createElement("span", { className: "brand-sub" }, "CDM 2026 \xB7 entre amis")), /* @__PURE__ */ React.createElement("div", { className: "top-actions" }, /* @__PURE__ */ React.createElement("button", { className: "bell-btn" + (notifsOn ? " on" : ""), onClick: toggleNotifs, "aria-label": "Notifications", title: notifsOn ? "Notifications activ\xE9es" : "Activer les notifications" }, notifsOn ? "\u{1F514}" : "\u{1F515}"), /* @__PURE__ */ React.createElement("button", { className: "sync-btn", onClick: loadAll, "aria-label": "Actualiser" }, /* @__PURE__ */ React.createElement("span", { className: syncing ? "ball-spin" : "" }, "\u26BD"), /* @__PURE__ */ React.createElement("span", { className: "sync-time" }, syncing ? "sync\u2026" : lastSync ? lastSync.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "\u2014")))), /* @__PURE__ */ React.createElement("main", { className: "content" }, tab === "classement" && /* @__PURE__ */ React.createElement(
     Leaderboard,
     {
       ranking,
@@ -1109,7 +1287,7 @@ function NewBet({ onSubmit, available = 0 }) {
       placeholder: 'Ex : "Mbapp\xE9", "Carton rouge dans le match"\u2026',
       onChange: (e) => setPick(e.target.value)
     }
-  ))), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Cat\xE9gorie"), /* @__PURE__ */ React.createElement("div", { className: "chip-row" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip" + (categorie === "classique" ? " sel" : ""), onClick: () => setCategorie("classique") }, "\u{1F3AF} Classique"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip" + (categorie === "fun" ? " sel" : ""), onClick: () => setCategorie("fun") }, "\u{1F3B2} Fun \xB7 grosse cote")), categorie === "fun" && /* @__PURE__ */ React.createElement("small", { className: "muted" }, "Pari plaisir \xE0 tr\xE8s grosse cote : compte dans l'argent, pas dans le % de r\xE9ussite.")), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Capture du pari ", /* @__PURE__ */ React.createElement("em", { className: "opt" }, "optionnel \xB7 sert de preuve aux copains")), /* @__PURE__ */ React.createElement("input", { type: "file", accept: "image/*", onChange: onPickProof }), proofData && /* @__PURE__ */ React.createElement("div", { className: "proof-preview" }, /* @__PURE__ */ React.createElement("img", { src: proofData, alt: "Capture du pari" }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "act del", onClick: () => setProofData(null) }, "\u2715 Retirer la capture")), proofErr && /* @__PURE__ */ React.createElement("small", { className: "form-hint warn" }, proofErr)), /* @__PURE__ */ React.createElement(CoteMise, { cote, setCote, mise, setMise, available, overBankroll }), /* @__PURE__ */ React.createElement(RecapGain, { label, pick: pickFinal, valid, gain }), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !valid || saving, onClick: submit }, saving ? "Enregistrement\u2026" : "Valider le ticket")), mode === "lien" && /* @__PURE__ */ React.createElement("div", { className: "form-card" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Lien du pari (Stake, Winamax, Betclic\u2026)"), /* @__PURE__ */ React.createElement(
+  ))), /* @__PURE__ */ React.createElement(CategorieField, { categorie, setCategorie }), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Capture du pari ", /* @__PURE__ */ React.createElement("em", { className: "opt" }, "optionnel \xB7 sert de preuve aux copains")), /* @__PURE__ */ React.createElement("input", { type: "file", accept: "image/*", onChange: onPickProof }), proofData && /* @__PURE__ */ React.createElement("div", { className: "proof-preview" }, /* @__PURE__ */ React.createElement("img", { src: proofData, alt: "Capture du pari" }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "act del", onClick: () => setProofData(null) }, "\u2715 Retirer la capture")), proofErr && /* @__PURE__ */ React.createElement("small", { className: "form-hint warn" }, proofErr)), /* @__PURE__ */ React.createElement(CoteMise, { cote, setCote, mise, setMise, available, overBankroll }), /* @__PURE__ */ React.createElement(RecapGain, { label, pick: pickFinal, valid, gain }), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !valid || saving, onClick: submit }, saving ? "Enregistrement\u2026" : "Valider le ticket")), mode === "lien" && /* @__PURE__ */ React.createElement("div", { className: "form-card" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Lien du pari (Stake, Winamax, Betclic\u2026)"), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "url",
@@ -1141,7 +1319,10 @@ function NewBet({ onSubmit, available = 0 }) {
       placeholder: 'Ex : "Victoire France + Plus de 2,5 buts"',
       onChange: (e) => setPick(e.target.value)
     }
-  )), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Cat\xE9gorie"), /* @__PURE__ */ React.createElement("div", { className: "chip-row" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip" + (categorie === "classique" ? " sel" : ""), onClick: () => setCategorie("classique") }, "\u{1F3AF} Classique"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip" + (categorie === "fun" ? " sel" : ""), onClick: () => setCategorie("fun") }, "\u{1F3B2} Fun \xB7 grosse cote")), categorie === "fun" && /* @__PURE__ */ React.createElement("small", { className: "muted" }, "Pari plaisir \xE0 tr\xE8s grosse cote : compte dans l'argent, pas dans le % de r\xE9ussite.")), /* @__PURE__ */ React.createElement(CoteMise, { cote, setCote, mise, setMise, available, overBankroll }), /* @__PURE__ */ React.createElement(RecapGain, { label, pick: pickFinal, valid, gain }), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !valid || saving, onClick: submit }, saving ? "Enregistrement\u2026" : "Valider le ticket")));
+  )), /* @__PURE__ */ React.createElement(CategorieField, { categorie, setCategorie }), /* @__PURE__ */ React.createElement(CoteMise, { cote, setCote, mise, setMise, available, overBankroll }), /* @__PURE__ */ React.createElement(RecapGain, { label, pick: pickFinal, valid, gain }), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !valid || saving, onClick: submit }, saving ? "Enregistrement\u2026" : "Valider le ticket")));
+}
+function CategorieField({ categorie, setCategorie }) {
+  return /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Cat\xE9gorie"), /* @__PURE__ */ React.createElement("div", { className: "chip-row" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip" + (categorie === "classique" ? " sel" : ""), onClick: () => setCategorie("classique") }, "\u{1F3AF} Classique"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip" + (categorie === "fun" ? " sel" : ""), onClick: () => setCategorie("fun") }, "\u{1F3B2} Fun \xB7 grosse cote")), categorie === "fun" && /* @__PURE__ */ React.createElement("small", { className: "muted" }, "Pari plaisir \xE0 tr\xE8s grosse cote : compte dans l'argent, pas dans le % de r\xE9ussite."));
 }
 function CoteMise({ cote, setCote, mise, setMise, available = 0, overBankroll = false }) {
   return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Cote"), /* @__PURE__ */ React.createElement("input", { type: "text", inputMode: "decimal", value: cote, placeholder: "1,85", onChange: (e) => setCote(e.target.value) })), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Mise (\u20AC)"), /* @__PURE__ */ React.createElement("input", { type: "text", inputMode: "decimal", value: mise, placeholder: "10", onChange: (e) => setMise(e.target.value) }))), overBankroll ? /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "Mise sup\xE9rieure \xE0 ta bankroll disponible (", EUR(available), "). R\xE9duis la mise ou fais un red\xE9p\xF4t depuis l'onglet Stats.") : /* @__PURE__ */ React.createElement("small", { className: "muted" }, "Bankroll disponible : ", EUR(available)));
@@ -1160,9 +1341,11 @@ function StatsView({ players, betsByPlayer, statsFor, setStatsFor, me, onDeposit
   const [pendingRestore, setPendingRestore] = useState(null);
   const [depBusy, setDepBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  function exportJSON() {
+  async function exportJSON() {
+    const proofs = await store.get("proofs", true) || {};
+    const reactions = await store.get("reactions", true) || {};
     const blob = new Blob(
-      [JSON.stringify({ app: "PRONO", exportedAt: Date.now(), players, betsByPlayer }, null, 2)],
+      [JSON.stringify({ app: "PRONO", exportedAt: Date.now(), players, betsByPlayer, proofs, reactions }, null, 2)],
       { type: "application/json" }
     );
     const a = document.createElement("a");
@@ -1258,7 +1441,6 @@ const CSS = `
 :root{
   --pitch:#0b2f1e;
   --pitch-2:#0f3b26;
-  --card:#123;
   --line:#2c5a40;
   --chalk:#f2f0e4;
   --chalk-dim:#9fc1ab;
@@ -1559,13 +1741,16 @@ const CSS = `
 .empty{text-align:center;padding:42px 16px;color:var(--chalk-dim)}
 .empty-icon{font-size:38px;margin-bottom:10px}
 .loading-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:70vh;font-size:30px}
+.top-actions{display:flex;align-items:center;gap:8px}
+.bell-btn{
+  background:transparent;border:1px solid var(--line);border-radius:10px;
+  padding:6px 10px;font-size:15px;line-height:1;cursor:pointer;opacity:.55;
+}
+.bell-btn.on{opacity:1;border-color:var(--gold)}
 .toast{
   position:fixed;bottom:84px;left:50%;transform:translateX(-50%);
   background:var(--gold);color:#081f14;font-weight:700;font-size:14px;
   border-radius:999px;padding:10px 20px;z-index:50;box-shadow:0 6px 20px rgba(0,0,0,.35);
-}
-@media(min-width:560px){
-  .stat-grid{grid-template-columns:repeat(3,1fr)}
 }
 `;
 const rootEl = document.getElementById("root");
