@@ -277,6 +277,14 @@ const EUR = (n) => (Number.isFinite(n) ? n : 0).toLocaleString("fr-FR", {
 });
 const signEUR = (n) => (n > 0 ? "+" : "") + EUR(n);
 const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+const RECOVERY_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const genRecoveryCode = () => Array.from(crypto.getRandomValues(new Uint32Array(6))).map((n) => RECOVERY_CHARS[n % RECOVERY_CHARS.length]).join("");
+async function hashCode(code) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("prono:" + String(code || "").trim().toUpperCase()));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+const authUidNow = () => firebase.auth && firebase.auth().currentUser ? firebase.auth().currentUser.uid : null;
+const fmtTs = (t) => t ? new Date(t).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) + " \xE0 " + new Date(t).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : null;
 function computeStreaks(bets) {
   const settled = bets.filter((b) => b.statut === "gagne" || b.statut === "perdu").sort((a, b) => (a.settledAt || a.createdAt || 0) - (b.settledAt || b.createdAt || 0));
   let curWin = 0, curLoss = 0, bestWin = 0, worstLoss = 0;
@@ -465,7 +473,6 @@ function earnedBadges(player, bets, stats, streaks, isFirst) {
   if (streaks.bestWin >= 5) out.push("intouchable");
   if ((player.deposits || []).length >= 3) out.push("rat");
   if (+player.start > 0 && stats.profit >= +player.start) out.push("millionnaire");
-  if (isFirst) out.push("roi");
   return out;
 }
 function buildHallOfFame(players, betsByPlayer) {
@@ -614,6 +621,7 @@ function App() {
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState(null);
   const [toast, setToast] = useState(null);
+  const [recoveryBanner, setRecoveryBanner] = useState(null);
   const [statsFor, setStatsFor] = useState(null);
   const toastTimer = useRef(null);
   const joiningRef = useRef(false);
@@ -628,12 +636,18 @@ function App() {
   const meRef = useRef(null);
   const notifRef = useRef(false);
   const prevBetsRef = useRef(null);
+  const prevCommentsRef = useRef(null);
+  const betsByPlayerRef = useRef({});
+  const securedRef = useRef(false);
   useEffect(() => {
     meRef.current = me;
   }, [me]);
   useEffect(() => {
     playersRef.current = players;
   }, [players]);
+  useEffect(() => {
+    betsByPlayerRef.current = betsByPlayer;
+  }, [betsByPlayer]);
   useEffect(() => {
     notifRef.current = notifsOn;
   }, [notifsOn]);
@@ -680,6 +694,35 @@ function App() {
     const snap = {};
     for (const [key, { bet }] of Object.entries(flat)) snap[key] = bet.statut || "en_cours";
     prevBetsRef.current = snap;
+  }
+  function notifyComments(next) {
+    const prev = prevCommentsRef.current;
+    if (prev) {
+      for (const [betId, thread] of Object.entries(next || {})) {
+        for (const [cid, c] of Object.entries(thread || {})) {
+          if (!c || !c.text || (prev[betId] || {})[cid]) continue;
+          if (c.pid === meRef.current) continue;
+          let ownerPid = null;
+          for (const [pid, bets] of Object.entries(betsByPlayerRef.current)) {
+            if ((bets || []).some((b) => b && b.id === betId)) { ownerPid = pid; break; }
+          }
+          if (ownerPid !== meRef.current) continue;
+          const p = playersRef.current[c.pid];
+          const bet = (betsByPlayerRef.current[ownerPid] || []).find((b) => b.id === betId);
+          const body = `${p ? p.emoji + " " + p.name : "Quelqu'un"} a comment\xE9 \xAB ${bet && bet.label || "ton pari"} \xBB : ${c.text}`;
+          if (notifRef.current) {
+            if (document.visibilityState === "visible") showToast(body);
+            else pushNotif("\u{1F4AC} Nouveau commentaire", body);
+          }
+        }
+      }
+    }
+    const snap2 = {};
+    for (const [betId, thread] of Object.entries(next || {})) {
+      snap2[betId] = {};
+      for (const cid of Object.keys(thread || {})) snap2[betId][cid] = 1;
+    }
+    prevCommentsRef.current = snap2;
   }
   async function toggleNotifs() {
     if (notifsOn) {
@@ -757,7 +800,9 @@ function App() {
         setBadges(val && typeof val === "object" ? val : {});
       }));
       offs.push(store.subscribe("comments", (val) => {
-        setComments(val && typeof val === "object" ? val : {});
+        const obj = val && typeof val === "object" ? val : {};
+        notifyComments(obj);
+        setComments(obj);
       }));
     })();
     return () => {
@@ -794,6 +839,37 @@ function App() {
       }
     })();
   }, [phase, me]);
+  useEffect(() => {
+    if (phase !== "app" || !me || !players[me] || securedRef.current) return;
+    securedRef.current = true;
+    (async () => {
+      try {
+        const p = players[me];
+        const au = authUidNow();
+        if (au && !p.ownerUid) await store.set("players:" + me, { ...p, ownerUid: au }, true);
+        const existing = await store.get("recovery:" + me, true);
+        let code = null;
+        try {
+          code = localStorage.getItem("prono.recovery");
+        } catch (e) {}
+        if (!existing) {
+          if (!code) {
+            code = genRecoveryCode();
+            try {
+              localStorage.setItem("prono.recovery", code);
+              localStorage.setItem("prono.codeSeen", "0");
+            } catch (e) {}
+          }
+          await store.set("recovery:" + me, await hashCode(code), true);
+        }
+        let seen = "1";
+        try {
+          seen = localStorage.getItem("prono.codeSeen") || "0";
+        } catch (e) {}
+        if (code && seen !== "1") setRecoveryBanner(code);
+      } catch (e) {}
+    })();
+  }, [phase, me, players]);
   useEffect(() => {
     if (phase !== "app" || !me || !players[me]) return;
     const myBets = betsByPlayer[me] || [];
@@ -836,12 +912,21 @@ function App() {
       }
       const slug = clean.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12);
       const id = (slug || "joueur") + "-" + uid().slice(0, 4);
-      const player = { id, name: clean, emoji, start: +start, deposits: [], createdAt: Date.now() };
+      const code = genRecoveryCode();
+      const codeHash = await hashCode(code);
+      const player = { id, name: clean, emoji, start: +start, deposits: [], createdAt: Date.now(), ownerUid: authUidNow() };
       const ok = await store.set("players:" + id, player, true);
       if (!ok) {
         showToast("\xC9chec d'enregistrement, r\xE9essaie");
         return;
       }
+      await store.set("recovery:" + id, codeHash, true);
+      try {
+        localStorage.setItem("prono.recovery", code);
+        localStorage.setItem("prono.codeSeen", "0");
+      } catch (e) {}
+      securedRef.current = true;
+      setRecoveryBanner(code);
       await store.set("me", { playerId: id }, false);
       setMe(id);
       setStatsFor(id);
@@ -851,6 +936,44 @@ function App() {
     } finally {
       joiningRef.current = false;
     }
+  }
+  const dismissCode = () => {
+    try {
+      localStorage.setItem("prono.codeSeen", "1");
+    } catch (e) {}
+    setRecoveryBanner(null);
+  };
+  async function claimAs(pid, code) {
+    const player = await store.get("players:" + pid, true) || players[pid];
+    if (!player) {
+      showToast("Joueur introuvable");
+      return;
+    }
+    const proof = await hashCode(code);
+    const stored = await store.get("recovery:" + pid, true);
+    if (stored && stored !== proof) {
+      showToast("Code incorrect \u274C");
+      return;
+    }
+    if (!stored && !player.ownerUid) {
+      showToast("Ce compte n'a pas encore de code : ouvre l'app sur l'ancien appareil pour le g\xE9n\xE9rer.");
+      return;
+    }
+    const ok = await store.set("players:" + pid, { ...player, ownerUid: authUidNow(), recoveryProof: proof }, true);
+    if (!ok) {
+      showToast("Code refus\xE9, r\xE9essaie");
+      return;
+    }
+    try {
+      localStorage.setItem("prono.recovery", String(code).trim().toUpperCase());
+      localStorage.setItem("prono.codeSeen", "1");
+    } catch (e) {}
+    securedRef.current = true;
+    await store.set("me", { playerId: pid }, false);
+    setMe(pid);
+    setStatsFor(pid);
+    setPhase("app");
+    showToast(`Re-bienvenue ${player.name} ! \u26BD`);
   }
   async function deletePlayer(pid) {
     if (pid !== me) {
@@ -872,6 +995,7 @@ function App() {
         }
       }
       await store.delete("badges:" + pid, true);
+      await store.delete("recovery:" + pid, true);
       const okBets = await store.delete("bets:" + pid, true);
       const okPlayer = await store.delete("players:" + pid, true);
       if (!okBets || !okPlayer) throw new Error("delete failed");
@@ -1024,7 +1148,9 @@ function App() {
       {
         onJoin: joinAs,
         nbPlayers: Object.keys(players).length,
-        takenNames: Object.values(players).map((p) => (p.name || "").trim().toLowerCase())
+        takenNames: Object.values(players).map((p) => (p.name || "").trim().toLowerCase()),
+        playersList: Object.values(players),
+        onClaim: claimAs
       }
     ));
   const allBets = Object.entries(betsByPlayer).flatMap(([pid, bets]) => bets.map((b) => ({ ...b, playerId: pid }))).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -1032,11 +1158,11 @@ function App() {
     (a, b) => b.stats.rendement - a.stats.rendement || b.stats.profit - a.stats.profit || b.stats.roi - a.stats.roi
   );
   const myStats = players[me] ? computeStats(players[me], betsByPlayer[me] || []) : null;
-  const activity = buildActivity(players, betsByPlayer);
+  const activity = buildActivity(players, betsByPlayer, 30);
   const comparison = buildComparison(players, betsByPlayer);
   const comparisonPct = buildComparisonPct(players, betsByPlayer);
   const hall = buildHallOfFame(players, betsByPlayer);
-  return /* @__PURE__ */ React.createElement(Shell, null, /* @__PURE__ */ React.createElement("header", { className: "topbar" }, /* @__PURE__ */ React.createElement("div", { className: "brand-row" }, /* @__PURE__ */ React.createElement("h1", { className: "brand" }, "PRONO"), /* @__PURE__ */ React.createElement("span", { className: "brand-sub" }, "CDM 2026 \xB7 entre amis")), /* @__PURE__ */ React.createElement("div", { className: "top-actions" }, /* @__PURE__ */ React.createElement("button", { className: "bell-btn" + (notifsOn ? " on" : ""), onClick: toggleNotifs, "aria-label": "Notifications", title: notifsOn ? "Notifications activ\xE9es" : "Activer les notifications" }, notifsOn ? "\u{1F514}" : "\u{1F515}"), /* @__PURE__ */ React.createElement("button", { className: "sync-btn", onClick: loadAll, "aria-label": "Actualiser" }, /* @__PURE__ */ React.createElement("span", { className: syncing ? "ball-spin" : "" }, "\u26BD"), /* @__PURE__ */ React.createElement("span", { className: "sync-time" }, syncing ? "sync\u2026" : lastSync ? lastSync.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "\u2014")))), /* @__PURE__ */ React.createElement("main", { className: "content" }, tab === "classement" && /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement(Shell, null, /* @__PURE__ */ React.createElement("header", { className: "topbar" }, /* @__PURE__ */ React.createElement("div", { className: "brand-row" }, /* @__PURE__ */ React.createElement("h1", { className: "brand" }, "PRONO"), /* @__PURE__ */ React.createElement("span", { className: "brand-sub" }, "CDM 2026 \xB7 entre amis")), /* @__PURE__ */ React.createElement("div", { className: "top-actions" }, /* @__PURE__ */ React.createElement("button", { className: "bell-btn" + (notifsOn ? " on" : ""), onClick: toggleNotifs, "aria-label": "Notifications", title: notifsOn ? "Notifications activ\xE9es" : "Activer les notifications" }, notifsOn ? "\u{1F514}" : "\u{1F515}"), /* @__PURE__ */ React.createElement("button", { className: "sync-btn", onClick: loadAll, "aria-label": "Actualiser" }, /* @__PURE__ */ React.createElement("span", { className: syncing ? "ball-spin" : "" }, "\u26BD"), /* @__PURE__ */ React.createElement("span", { className: "sync-time" }, syncing ? "sync\u2026" : lastSync ? lastSync.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "\u2014")))), /* @__PURE__ */ React.createElement("main", { className: "content" }, recoveryBanner && /* @__PURE__ */ React.createElement("div", { className: "code-banner" }, /* @__PURE__ */ React.createElement("span", null, "\u{1F511} Ton code de r\xE9cup\xE9ration \u2014 note-le, il permet de retrouver ton compte sur un autre t\xE9l\xE9phone :"), /* @__PURE__ */ React.createElement("b", null, recoveryBanner), /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: dismissCode }, "C'est not\xE9 \u2713")), tab === "classement" && /* @__PURE__ */ React.createElement(
     Leaderboard,
     {
       ranking,
@@ -1096,7 +1222,7 @@ function App() {
     /* @__PURE__ */ React.createElement("span", { className: "tab-label" }, label)
   ))), toast && /* @__PURE__ */ React.createElement("div", { className: "toast" }, toast));
 }
-function JoinScreen({ onJoin, nbPlayers, takenNames = [] }) {
+function JoinScreen({ onJoin, onClaim, playersList = [], nbPlayers, takenNames = [] }) {
   const [name, setName] = useState("");
   const [emoji, setEmoji] = useState("\u26BD");
   const [start, setStart] = useState("100");
@@ -1140,12 +1266,35 @@ function JoinScreen({ onJoin, nbPlayers, takenNames = [] }) {
       value: start,
       onChange: (e) => setStart(e.target.value)
     }
-  ), /* @__PURE__ */ React.createElement("small", { className: "muted" }, "Mettez tous le m\xEAme montant pour comparer les b\xE9n\xE9fices.")), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !valid, onClick: handleJoin }, busy ? "Inscription en cours\u2026" : "Entrer sur le terrain"), /* @__PURE__ */ React.createElement("small", { className: "muted center" }, "Les paris et bankrolls sont visibles par tous les amis qui ouvrent cette app.")));
+  ), /* @__PURE__ */ React.createElement("small", { className: "muted" }, "Mettez tous le m\xEAme montant pour comparer les b\xE9n\xE9fices.")), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !valid, onClick: handleJoin }, busy ? "Inscription en cours\u2026" : "Entrer sur le terrain"), /* @__PURE__ */ React.createElement("small", { className: "muted center" }, "Les paris et bankrolls sont visibles par tous les amis qui ouvrent cette app.")), /* @__PURE__ */ React.createElement(ClaimBox, { players: playersList, onClaim }));
+}
+function ClaimBox({ players = [], onClaim }) {
+  const [open, setOpen] = useState(false);
+  const [pid, setPid] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!players.length) return null;
+  if (!open) return /* @__PURE__ */ React.createElement("button", { className: "claim-link", onClick: () => setOpen(true) }, "D\xE9j\xE0 inscrit ? R\xE9cup\xE9rer mon compte avec mon code");
+  const ready = pid && code.trim().length >= 4 && !busy;
+  async function go() {
+    if (!ready) return;
+    setBusy(true);
+    try {
+      await onClaim(pid, code);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return /* @__PURE__ */ React.createElement("div", { className: "join-card" }, /* @__PURE__ */ React.createElement("p", { className: "muted small" }, "Nouveau t\xE9l\xE9phone ou cache vid\xE9 ? Retrouve ton compte avec le code de r\xE9cup\xE9ration affich\xE9 \xE0 ton inscription."), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Ton joueur"), /* @__PURE__ */ React.createElement("select", { value: pid, onChange: (e) => setPid(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 Choisis ton joueur \u2014"), players.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.emoji + " " + p.name)))), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Code de r\xE9cup\xE9ration"), /* @__PURE__ */ React.createElement("input", { type: "text", value: code, maxLength: 12, placeholder: "Ex : K7M2QX", autoCapitalize: "characters", autoCorrect: "off", spellCheck: false, onChange: (e) => setCode(e.target.value.toUpperCase()) })), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !ready, onClick: go }, busy ? "V\xE9rification\u2026" : "R\xE9cup\xE9rer mon compte"), /* @__PURE__ */ React.createElement("button", { className: "claim-link", onClick: () => setOpen(false) }, "\u2190 Retour \xE0 l'inscription"));
 }
 function Leaderboard({ ranking, me, onSelect, players = {}, activity = [], comparison = null, comparisonPct = null, hall = [], badges = {} }) {
+  const [sortBy, setSortBy] = useState("rendement");
+  const [actAll, setActAll] = useState(false);
   if (ranking.length === 0)
     return /* @__PURE__ */ React.createElement(Empty, { icon: "\u{1F3DF}\uFE0F", text: "Personne sur le terrain pour l'instant." });
-  return /* @__PURE__ */ React.createElement("div", { className: "stack" }, activity.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "activity-card" }, activity.map((e, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "activity-line" }, e.txt))), /* @__PURE__ */ React.createElement("h2", { className: "section-title" }, "Classement g\xE9n\xE9ral"), ranking.map(({ player, stats, streaks }, i) => /* @__PURE__ */ React.createElement("button", { key: player.id, className: "rank-card", onClick: () => onSelect(player.id) }, /* @__PURE__ */ React.createElement("div", { className: "rank-pos" + (i === 0 ? " gold" : "") }, i === 0 ? "\u{1F451}" : i + 1), /* @__PURE__ */ React.createElement("div", { className: "rank-avatar" }, player.emoji), /* @__PURE__ */ React.createElement("div", { className: "rank-main" }, /* @__PURE__ */ React.createElement("div", { className: "rank-name" }, player.name, player.id === me && /* @__PURE__ */ React.createElement("span", { className: "me-chip" }, "moi"), Object.keys(badges[player.id] || {}).length > 0 && /* @__PURE__ */ React.createElement("span", { className: "rank-badges" }, BADGES.filter((d) => (badges[player.id] || {})[d.id]).map((d) => d.icon).join(""))), /* @__PURE__ */ React.createElement("div", { className: "rank-meta" }, stats.wins, "V \xB7 ", stats.losses, "D \xB7 ", stats.pendingCount, " en cours", stats.winsBase + stats.lossesBase > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", Math.round(stats.winRate * 100), " % WR")), /* @__PURE__ */ React.createElement("div", { className: "rank-meta" }, "Investi ", EUR(stats.totalIn), stats.redeposits > 0 && /* @__PURE__ */ React.createElement("span", { className: "redep-chip" }, "+", EUR(stats.redeposits), " red\xE9pos\xE9s")), (streaks.curWin >= 2 || streaks.curLoss >= 2) && /* @__PURE__ */ React.createElement("div", { className: "rank-meta streak" + (streaks.curLoss >= 2 ? " cold" : "") }, streaks.curWin >= 2 ? `🔥 ${streaks.curWin} victoires d'affilée` : `❄️ ${streaks.curLoss} défaites d'affilée`, streaks.curWin >= 2 && streaks.curWin === streaks.bestWin || streaks.curLoss >= 2 && streaks.curLoss === streaks.worstLoss ? " · 🏅 record perso" : "")), /* @__PURE__ */ React.createElement("div", { className: "rank-right" }, /* @__PURE__ */ React.createElement("div", { className: "rank-profit " + (stats.rendement > 0 ? "pos" : stats.rendement < 0 ? "neg" : "") }, (stats.rendement > 0 ? "+" : "") + (stats.rendement * 100).toFixed(1), " %"), /* @__PURE__ */ React.createElement("div", { className: "rank-sub " + (stats.profit > 0 ? "pos" : stats.profit < 0 ? "neg" : "") }, signEUR(stats.profit), " net"), /* @__PURE__ */ React.createElement("div", { className: "rank-bankroll" }, "Bankroll ", EUR(stats.bankroll))))), /* @__PURE__ */ React.createElement("p", { className: "muted center small" }, "Class\xE9 \xE0 la rentabilit\xE9 (b\xE9n\xE9fice net \xF7 total investi, red\xE9p\xF4ts inclus). Touche un joueur pour ses stats."), comparison && /* @__PURE__ */ React.createElement("div", { className: "chart-card" }, /* @__PURE__ */ React.createElement("div", { className: "chart-title" }, "La course \xB7 b\xE9n\xE9fice cumul\xE9 par joueur"), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 200 }, /* @__PURE__ */ React.createElement(LineChart, { data: comparison.data, margin: { top: 8, right: 8, bottom: 0, left: -16 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false }), /* @__PURE__ */ React.createElement(
+  const kingId = ranking[0].player.id;
+  const sorted = sortBy === "profit" ? [...ranking].sort((a, b) => b.stats.profit - a.stats.profit) : sortBy === "wr" ? [...ranking].sort((a, b) => b.stats.winRate - a.stats.winRate || b.stats.profit - a.stats.profit) : ranking;
+  return /* @__PURE__ */ React.createElement("div", { className: "stack" }, activity.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "activity-card" }, (actAll ? activity : activity.slice(0, 4)).map((e, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "activity-line" }, e.txt)), activity.length > 4 && /* @__PURE__ */ React.createElement("button", { className: "activity-more", onClick: () => setActAll(!actAll) }, actAll ? "R\xE9duire" : `Voir toute l'activit\xE9 (${activity.length})`)), /* @__PURE__ */ React.createElement("h2", { className: "section-title" }, "Classement g\xE9n\xE9ral"), /* @__PURE__ */ React.createElement("div", { className: "filter-row" }, [["rendement", "Rentabilit\xE9"], ["profit", "\u20AC net"], ["wr", "% r\xE9ussite"]].map(([id, label]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "chip" + (sortBy === id ? " sel" : ""), onClick: () => setSortBy(id) }, label))), sorted.map(({ player, stats, streaks }, i) => /* @__PURE__ */ React.createElement("button", { key: player.id, className: "rank-card", onClick: () => onSelect(player.id) }, /* @__PURE__ */ React.createElement("div", { className: "rank-pos" + (i === 0 ? " gold" : "") }, i === 0 ? "\u{1F451}" : i + 1), /* @__PURE__ */ React.createElement("div", { className: "rank-avatar" }, player.emoji), /* @__PURE__ */ React.createElement("div", { className: "rank-main" }, /* @__PURE__ */ React.createElement("div", { className: "rank-name" }, player.name, player.id === me && /* @__PURE__ */ React.createElement("span", { className: "me-chip" }, "moi"), (() => { const ic = BADGES.filter((d) => d.id === "roi" ? player.id === kingId : (badges[player.id] || {})[d.id]).map((d) => d.icon).join(""); return ic ? /* @__PURE__ */ React.createElement("span", { className: "rank-badges" }, ic) : null; })()), /* @__PURE__ */ React.createElement("div", { className: "rank-meta" }, stats.wins, "V \xB7 ", stats.losses, "D \xB7 ", stats.pendingCount, " en cours", stats.winsBase + stats.lossesBase > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", Math.round(stats.winRate * 100), " % WR")), /* @__PURE__ */ React.createElement("div", { className: "rank-meta" }, "Investi ", EUR(stats.totalIn), stats.redeposits > 0 && /* @__PURE__ */ React.createElement("span", { className: "redep-chip" }, "+", EUR(stats.redeposits), " red\xE9pos\xE9s")), (streaks.curWin >= 2 || streaks.curLoss >= 2) && /* @__PURE__ */ React.createElement("div", { className: "rank-meta streak" + (streaks.curLoss >= 2 ? " cold" : "") }, streaks.curWin >= 2 ? `🔥 ${streaks.curWin} victoires d'affilée` : `❄️ ${streaks.curLoss} défaites d'affilée`, streaks.curWin >= 2 && streaks.curWin === streaks.bestWin || streaks.curLoss >= 2 && streaks.curLoss === streaks.worstLoss ? " · 🏅 record perso" : "")), /* @__PURE__ */ React.createElement("div", { className: "rank-right" }, /* @__PURE__ */ React.createElement("div", { className: "rank-profit " + (stats.rendement > 0 ? "pos" : stats.rendement < 0 ? "neg" : "") }, (stats.rendement > 0 ? "+" : "") + (stats.rendement * 100).toFixed(1), " %"), /* @__PURE__ */ React.createElement("div", { className: "rank-sub " + (stats.profit > 0 ? "pos" : stats.profit < 0 ? "neg" : "") }, signEUR(stats.profit), " net"), /* @__PURE__ */ React.createElement("div", { className: "rank-bankroll" }, "Bankroll ", EUR(stats.bankroll))))), /* @__PURE__ */ React.createElement("p", { className: "muted center small" }, (sortBy === "rendement" ? "Classement officiel : rentabilit\xE9 (b\xE9n\xE9fice net \xF7 total investi, red\xE9p\xF4ts inclus)." : "Tri d'affichage \u2014 le classement officiel reste \xE0 la rentabilit\xE9.") + " Touche un joueur pour ses stats."), comparison && /* @__PURE__ */ React.createElement("div", { className: "chart-card" }, /* @__PURE__ */ React.createElement("div", { className: "chart-title" }, "La course \xB7 b\xE9n\xE9fice cumul\xE9 par joueur"), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 200 }, /* @__PURE__ */ React.createElement(LineChart, { data: comparison.data, margin: { top: 8, right: 8, bottom: 0, left: -16 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false }), /* @__PURE__ */ React.createElement(
     Tooltip,
     {
       formatter: (v, key) => [EUR(v), players[key] ? players[key].name : key],
@@ -1240,6 +1389,7 @@ function BetTicket({ bet, player, mine, onStatut, onDelete, betReactions = {}, m
   const [payoutInput, setPayoutInput] = useState("");
   const [proof, setProof] = useState(null);
   const [proofLoading, setProofLoading] = useState(false);
+  const [zoom, setZoom] = useState(false);
   async function toggleProof() {
     if (proof) {
       setProof(null);
@@ -1275,11 +1425,12 @@ function BetTicket({ bet, player, mine, onStatut, onDelete, betReactions = {}, m
   const reactionCounts = {};
   for (const emo of Object.values(betReactions)) reactionCounts[emo] = (reactionCounts[emo] || 0) + 1;
   const myReaction = betReactions[myId];
-  return /* @__PURE__ */ React.createElement("div", { className: "ticket " + meta.cls }, /* @__PURE__ */ React.createElement("div", { className: "ticket-head" }, /* @__PURE__ */ React.createElement("span", { className: "ticket-player" }, player ? player.emoji + " " + player.name : "?"), /* @__PURE__ */ React.createElement("span", { className: "ticket-badges" }, bet.categorie === "fun" && /* @__PURE__ */ React.createElement("span", { className: "badge fun" }, "\u{1F3B2} fun"), /* @__PURE__ */ React.createElement("span", { className: "badge " + meta.cls }, meta.label))), /* @__PURE__ */ React.createElement("div", { className: "ticket-match" }, bet.label), Array.isArray(bet.selections) && bet.selections.length > 1 ? /* @__PURE__ */ React.createElement("ul", { className: "ticket-sel" }, bet.selections.map((sel, i) => /* @__PURE__ */ React.createElement("li", { key: i }, /* @__PURE__ */ React.createElement("span", null, sel.match || "\u2014"), /* @__PURE__ */ React.createElement("em", null, sel.pick, sel.cote ? " \xB7 " + (+sel.cote).toFixed(2) : "")))) : bet.pick && /* @__PURE__ */ React.createElement("div", { className: "ticket-pick" }, "\u2192 ", bet.pick), bet.url && /* @__PURE__ */ React.createElement("a", { className: "stake-link", href: bet.url, target: "_blank", rel: "noopener noreferrer" }, "V\xE9rifier sur ", bet.book || bookFromUrl(bet.url), " \u2197"), bet.hasProof && /* @__PURE__ */ React.createElement("button", { className: "proof-btn", onClick: toggleProof, disabled: proofLoading }, proofLoading ? "Chargement\u2026" : proof ? "Masquer la capture" : "\u{1F4CE} Voir la capture du pari"), proof && /* @__PURE__ */ React.createElement("img", { className: "proof-img", src: proof, alt: "Capture du pari" }), /* @__PURE__ */ React.createElement("div", { className: "ticket-perf", "aria-hidden": "true" }), /* @__PURE__ */ React.createElement("div", { className: "ticket-nums" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("small", null, "Mise"), /* @__PURE__ */ React.createElement("strong", null, EUR(mise))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("small", null, "Cote"), /* @__PURE__ */ React.createElement("strong", null, cote.toLocaleString("fr-FR", { minimumFractionDigits: 2 }))), /* @__PURE__ */ React.createElement("div", { className: "right" }, statut === "en_cours" || statut === "rembourse" ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("small", null, "Gain potentiel"), /* @__PURE__ */ React.createElement("strong", null, EUR(gainPotentiel))) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("small", null, "R\xE9sultat"), /* @__PURE__ */ React.createElement("strong", { className: resultat > 0 ? "pos" : resultat < 0 ? "neg" : "" }, signEUR(resultat))))), coteEffective != null && (statut === "cloture" || Math.abs(+bet.payout - gainPotentiel) > 0.01) && /* @__PURE__ */ React.createElement("div", { className: "ticket-cashout" }, statut === "cloture" ? "Cl\xF4tur\xE9 avant terme \xB7 " : "", "Encaiss\xE9 ", EUR(+bet.payout), " (", Math.round(+bet.payout / gainPotentiel * 100), " % du gain th\xE9orique) \xB7 cote effective ", coteEffective.toFixed(2)), /* @__PURE__ */ React.createElement("div", { className: "reaction-row" }, ["\u{1F525}", "\u{1F602}", "\u{1F480}", "\u{1F44F}"].map((emo) => /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "ticket " + meta.cls }, /* @__PURE__ */ React.createElement("div", { className: "ticket-head" }, /* @__PURE__ */ React.createElement("span", { className: "ticket-player" }, player ? player.emoji + " " + player.name : "?"), /* @__PURE__ */ React.createElement("span", { className: "ticket-badges" }, bet.categorie === "fun" && /* @__PURE__ */ React.createElement("span", { className: "badge fun" }, "\u{1F3B2} fun"), /* @__PURE__ */ React.createElement("span", { className: "badge " + meta.cls }, meta.label))), /* @__PURE__ */ React.createElement("div", { className: "ticket-match" }, bet.label), Array.isArray(bet.selections) && bet.selections.length > 1 ? /* @__PURE__ */ React.createElement("ul", { className: "ticket-sel" }, bet.selections.map((sel, i) => /* @__PURE__ */ React.createElement("li", { key: i }, /* @__PURE__ */ React.createElement("span", null, sel.match || "\u2014"), /* @__PURE__ */ React.createElement("em", null, sel.pick, sel.cote ? " \xB7 " + (+sel.cote).toFixed(2) : "")))) : bet.pick && /* @__PURE__ */ React.createElement("div", { className: "ticket-pick" }, "\u2192 ", bet.pick), bet.url && /* @__PURE__ */ React.createElement("a", { className: "stake-link", href: bet.url, target: "_blank", rel: "noopener noreferrer" }, "V\xE9rifier sur ", bet.book || bookFromUrl(bet.url), " \u2197"), bet.hasProof && /* @__PURE__ */ React.createElement("button", { className: "proof-btn", onClick: toggleProof, disabled: proofLoading }, proofLoading ? "Chargement\u2026" : proof ? "Masquer la capture" : "\u{1F4CE} Voir la capture du pari"), proof && /* @__PURE__ */ React.createElement("img", { className: "proof-img", src: proof, alt: "Capture du pari", onClick: () => setZoom(true) }), zoom && proof && /* @__PURE__ */ React.createElement("div", { className: "lightbox", onClick: () => setZoom(false) }, /* @__PURE__ */ React.createElement("img", { src: proof, alt: "Capture du pari" })), /* @__PURE__ */ React.createElement("div", { className: "ticket-meta" }, bet.match && /* @__PURE__ */ React.createElement("span", { className: "lock-match" }, "\u{1F4C5} ", bet.match.label, " \xB7 ", fmtTs(bet.match.kick), " \u2014 "), bet.createdAt && "\u{1F550} Mis\xE9 le " + fmtTs(bet.createdAt), bet.settledAt ? " \xB7 r\xE9gl\xE9 le " + fmtTs(bet.settledAt) : "", bet.match && bet.createdAt && /* @__PURE__ */ React.createElement("span", { className: "lock " + (bet.createdAt <= bet.match.kick ? "ok" : "warn") }, bet.createdAt <= bet.match.kick ? " \u{1F512} avant le coup d'envoi" : " \u26A0\uFE0F apr\xE8s le coup d'envoi")), /* @__PURE__ */ React.createElement("div", { className: "ticket-perf", "aria-hidden": "true" }), /* @__PURE__ */ React.createElement("div", { className: "ticket-nums" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("small", null, "Mise"), /* @__PURE__ */ React.createElement("strong", null, EUR(mise))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("small", null, "Cote"), /* @__PURE__ */ React.createElement("strong", null, cote.toLocaleString("fr-FR", { minimumFractionDigits: 2 }))), /* @__PURE__ */ React.createElement("div", { className: "right" }, statut === "en_cours" || statut === "rembourse" ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("small", null, "Gain potentiel"), /* @__PURE__ */ React.createElement("strong", null, EUR(gainPotentiel))) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("small", null, "R\xE9sultat"), /* @__PURE__ */ React.createElement("strong", { className: resultat > 0 ? "pos" : resultat < 0 ? "neg" : "" }, signEUR(resultat))))), coteEffective != null && (statut === "cloture" || Math.abs(+bet.payout - gainPotentiel) > 0.01) && /* @__PURE__ */ React.createElement("div", { className: "ticket-cashout" }, statut === "cloture" ? "Cl\xF4tur\xE9 avant terme \xB7 " : "", "Encaiss\xE9 ", EUR(+bet.payout), " (", Math.round(+bet.payout / gainPotentiel * 100), " % du gain th\xE9orique) \xB7 cote effective ", coteEffective.toFixed(2)), /* @__PURE__ */ React.createElement("div", { className: "reaction-row" }, ["\u{1F525}", "\u{1F602}", "\u{1F480}", "\u{1F44F}"].map((emo) => /* @__PURE__ */ React.createElement(
     "button",
     {
       key: emo,
       className: "reaction" + (myReaction === emo ? " mine" : ""),
+      "aria-label": "R\xE9agir " + emo,
       onClick: () => onReact && onReact(bet.id, emo)
     },
     emo,
@@ -1313,6 +1464,8 @@ function NewBet({ onSubmit, available = 0 }) {
   const [selections, setSelections] = useState(null);
   const [saving, setSaving] = useState(false);
   const [categorie, setCategorie] = useState("classique");
+  const [matchIdx, setMatchIdx] = useState("");
+  const upcoming = CDM_MATCHES.map((m, i) => ({ m, i })).filter(({ m }) => new Date(m[0] + "T" + m[1] + ":00").getTime() > Date.now() - 3 * 36e5);
   const [proofData, setProofData] = useState(null);
   const [proofErr, setProofErr] = useState(null);
   const [importText, setImportText] = useState("");
@@ -1379,7 +1532,11 @@ function NewBet({ onSubmit, available = 0 }) {
         book: linkInfo ? bookFromUrl(linkInfo.url) : null,
         selections: selections || null,
         proof: proofData || null,
-        categorie
+        categorie,
+        match: matchIdx === "" ? null : (() => {
+          const m = CDM_MATCHES[+matchIdx];
+          return { kick: new Date(m[0] + "T" + m[1] + ":00").getTime(), label: m[5] ? m[4] + " \u2014 " + m[5] : m[4] };
+        })()
       });
       setLibre("");
       setPick("");
@@ -1390,6 +1547,7 @@ function NewBet({ onSubmit, available = 0 }) {
       setProofData(null);
       setProofErr(null);
       setCategorie("classique");
+      setMatchIdx("");
       setImportText("");
       setImportErr(null);
       setImportNote(null);
@@ -1429,13 +1587,13 @@ function NewBet({ onSubmit, available = 0 }) {
       placeholder: "https://stake.com/sports/\u2026?iid=\u2026",
       onChange: (e) => setStakeLink(e.target.value)
     }
-  ), stakeLink.trim() && !linkInfo && /* @__PURE__ */ React.createElement("small", { className: "form-hint warn" }, "Lien invalide \u2014 colle l'URL compl\xE8te partag\xE9e depuis le bookmaker."), linkInfo && /* @__PURE__ */ React.createElement("small", { className: "form-hint ok" }, bookFromUrl(linkInfo.url), " reconnu \u2713", linkInfo.iid ? " \xB7 r\xE9f. " + linkInfo.iid : "")), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Capture du pari ", /* @__PURE__ */ React.createElement("em", { className: "opt" }, "obligatoire si pas de lien")), /* @__PURE__ */ React.createElement("input", { type: "file", accept: "image/*", onChange: onPickProof }), proofData && /* @__PURE__ */ React.createElement("div", { className: "proof-preview" }, /* @__PURE__ */ React.createElement("img", { src: proofData, alt: "Capture du pari" }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "act del", onClick: () => setProofData(null) }, "\u2715 Retirer la capture")), proofErr && /* @__PURE__ */ React.createElement("small", { className: "form-hint warn" }, proofErr)), !hasJustif && /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "\u{1F4CB} Ajoute le lien du pari ou une capture d'\xE9cran pour pouvoir valider le ticket \u2014 c'est la preuve pour les copains."), /* @__PURE__ */ React.createElement(CategorieField, { categorie, setCategorie }), /* @__PURE__ */ React.createElement(CoteMise, { cote, setCote, mise, setMise, available, overBankroll }), /* @__PURE__ */ React.createElement(RecapGain, { label, pick: pickFinal, valid, gain }), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !valid || saving, onClick: submit }, saving ? "Enregistrement\u2026" : "Valider le ticket")));
+  ), stakeLink.trim() && !linkInfo && /* @__PURE__ */ React.createElement("small", { className: "form-hint warn" }, "Lien invalide \u2014 colle l'URL compl\xE8te partag\xE9e depuis le bookmaker."), linkInfo && /* @__PURE__ */ React.createElement("small", { className: "form-hint ok" }, bookFromUrl(linkInfo.url), " reconnu \u2713", linkInfo.iid ? " \xB7 r\xE9f. " + linkInfo.iid : "")), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Capture du pari ", /* @__PURE__ */ React.createElement("em", { className: "opt" }, "obligatoire si pas de lien")), /* @__PURE__ */ React.createElement("input", { type: "file", accept: "image/*", onChange: onPickProof }), proofData && /* @__PURE__ */ React.createElement("div", { className: "proof-preview" }, /* @__PURE__ */ React.createElement("img", { src: proofData, alt: "Capture du pari" }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "act del", onClick: () => setProofData(null) }, "\u2715 Retirer la capture")), proofErr && /* @__PURE__ */ React.createElement("small", { className: "form-hint warn" }, proofErr)), !hasJustif && /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "\u{1F4CB} Ajoute le lien du pari ou une capture d'\xE9cran pour pouvoir valider le ticket \u2014 c'est la preuve pour les copains."), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Match concern\xE9 ", /* @__PURE__ */ React.createElement("em", { className: "opt" }, "optionnel \u2014 active le verrou anti-triche")), /* @__PURE__ */ React.createElement("select", { value: matchIdx, onChange: (e) => setMatchIdx(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 Aucun match pr\xE9cis (combin\xE9, pari long terme\u2026) \u2014"), upcoming.map(({ m, i }) => /* @__PURE__ */ React.createElement("option", { key: i, value: String(i) }, m[0].slice(8, 10) + "/" + m[0].slice(5, 7) + " " + m[1] + " \xB7 " + (m[5] ? m[4] + " \u2014 " + m[5] : m[4])))), matchIdx !== "" && /* @__PURE__ */ React.createElement("small", { className: "form-hint ok" }, "\u{1F512} Le ticket affichera s'il a \xE9t\xE9 mis\xE9 avant ou apr\xE8s le coup d'envoi.")), /* @__PURE__ */ React.createElement(CategorieField, { categorie, setCategorie }), /* @__PURE__ */ React.createElement(CoteMise, { cote, setCote, mise, setMise, available, overBankroll }), /* @__PURE__ */ React.createElement(RecapGain, { label, pick: pickFinal, valid, gain }), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !valid || saving, onClick: submit }, saving ? "Enregistrement\u2026" : "Valider le ticket")));
 }
 function CategorieField({ categorie, setCategorie }) {
   return /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Cat\xE9gorie"), /* @__PURE__ */ React.createElement("div", { className: "chip-row" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip" + (categorie === "classique" ? " sel" : ""), onClick: () => setCategorie("classique") }, "\u{1F3AF} Classique"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip" + (categorie === "fun" ? " sel" : ""), onClick: () => setCategorie("fun") }, "\u{1F3B2} Fun \xB7 grosse cote")), categorie === "fun" && /* @__PURE__ */ React.createElement("small", { className: "muted" }, "Pari plaisir \xE0 tr\xE8s grosse cote : compte dans l'argent, pas dans le % de r\xE9ussite."));
 }
 function CoteMise({ cote, setCote, mise, setMise, available = 0, overBankroll = false }) {
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Cote"), /* @__PURE__ */ React.createElement("input", { type: "text", inputMode: "decimal", value: cote, placeholder: "1,85", onChange: (e) => setCote(e.target.value) })), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Mise (\u20AC)"), /* @__PURE__ */ React.createElement("input", { type: "text", inputMode: "decimal", value: mise, placeholder: "10", onChange: (e) => setMise(e.target.value) }))), overBankroll ? /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "Mise sup\xE9rieure \xE0 ta bankroll disponible (", EUR(available), "). R\xE9duis la mise ou fais un red\xE9p\xF4t depuis l'onglet Stats.") : /* @__PURE__ */ React.createElement("small", { className: "muted" }, "Bankroll disponible : ", EUR(available)));
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Cote"), /* @__PURE__ */ React.createElement("input", { type: "text", inputMode: "decimal", value: cote, placeholder: "1,85", onChange: (e) => setCote(e.target.value) })), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Mise (\u20AC)"), /* @__PURE__ */ React.createElement("input", { type: "text", inputMode: "decimal", value: mise, placeholder: "10", onChange: (e) => setMise(e.target.value) }))), /* @__PURE__ */ React.createElement("div", { className: "win-chips" }, [5, 10, 20, 50].map((v) => /* @__PURE__ */ React.createElement("button", { key: v, type: "button", className: "chip mini dark", onClick: () => setMise(String(v)) }, v + " \u20AC")), available > 0 && /* @__PURE__ */ React.createElement("button", { type: "button", className: "chip mini dark", onClick: () => setMise(available.toFixed(2).replace(".", ",")) }, "Max")), overBankroll ? /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "Mise sup\xE9rieure \xE0 ta bankroll disponible (", EUR(available), "). R\xE9duis la mise ou fais un red\xE9p\xF4t depuis l'onglet Stats.") : /* @__PURE__ */ React.createElement("small", { className: "muted" }, "Bankroll disponible : ", EUR(available)));
 }
 function RecapGain({ label, pick, valid, gain }) {
   return /* @__PURE__ */ React.createElement("div", { className: "gain-preview" + (valid ? " on" : "") }, /* @__PURE__ */ React.createElement("div", { className: "gain-left" }, /* @__PURE__ */ React.createElement("span", null, "Gain potentiel"), valid && (label || pick) && /* @__PURE__ */ React.createElement("small", { className: "gain-recap" }, [label, pick].filter(Boolean).join(" \xB7 "))), /* @__PURE__ */ React.createElement("strong", null, valid ? EUR(gain) : "\u2014"));
@@ -1480,6 +1638,12 @@ function StatsView({ players, betsByPlayer, statsFor, setStatsFor, me, onDeposit
   const sk = computeStreaks(bets);
   const series = bankrollSeries(player, bets);
   const isMe = player.id === me;
+  const officialRanking = list.map((p) => ({ id: p.id, st: computeStats(p, betsByPlayer[p.id] || []) })).sort((a, b) => b.st.rendement - a.st.rendement || b.st.profit - a.st.profit);
+  const isKing = officialRanking.length >= 2 && officialRanking[0].id === player.id && s.wins + s.losses + s.cashouts > 0;
+  let myCode = null;
+  try {
+    myCode = localStorage.getItem("prono.recovery");
+  } catch (e) {}
   const depN = parseFloat(String(depAmount).replace(",", "."));
   const depOk = Number.isFinite(depN) && depN > 0;
   async function confirmDeposit() {
@@ -1516,12 +1680,12 @@ function StatsView({ players, betsByPlayer, statsFor, setStatsFor, me, onDeposit
   )), /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "Le red\xE9p\xF4t augmente ta bankroll mais aussi ton total investi : ta rentabilit\xE9 % (et donc ton classement) en tiendra compte."), /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: () => {
     setShowDeposit(false);
     setDepAmount("");
-  } }, "Annuler"), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !depOk || depBusy, onClick: confirmDeposit }, depBusy ? "\u2026" : "Confirmer")))), isMe && /* @__PURE__ */ React.createElement("div", { className: "deposit-card" }, /* @__PURE__ */ React.createElement("div", { className: "backup-row" }, /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: exportJSON }, "\u{1F4BE} Exporter la comp\xE9t'"), /* @__PURE__ */ React.createElement("label", { className: "secondary file-btn" }, "\u{1F4C2} Importer", /* @__PURE__ */ React.createElement("input", { type: "file", accept: "application/json", hidden: true, onChange: onPickBackup }))), pendingRestore && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "Restaurer \xAB ", pendingRestore.name, " \xBB \xE9crasera les donn\xE9es actuelles des joueurs pr\xE9sents dans le fichier, pour tout le monde."), /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: () => setPendingRestore(null) }, "Annuler"), /* @__PURE__ */ React.createElement("button", { className: "primary", onClick: () => {
+  } }, "Annuler"), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !depOk || depBusy, onClick: confirmDeposit }, depBusy ? "\u2026" : "Confirmer")))), isMe && /* @__PURE__ */ React.createElement("div", { className: "deposit-card" }, /* @__PURE__ */ React.createElement("div", { className: "backup-row" }, /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: exportJSON }, "\u{1F4BE} Exporter la comp\xE9t'"), /* @__PURE__ */ React.createElement("label", { className: "secondary file-btn" }, "\u{1F4C2} Importer", /* @__PURE__ */ React.createElement("input", { type: "file", accept: "application/json", hidden: true, onChange: onPickBackup }))), myCode && /* @__PURE__ */ React.createElement("p", { className: "muted small" }, "\u{1F511} Code de r\xE9cup\xE9ration de ce compte : ", /* @__PURE__ */ React.createElement("span", { className: "code-inline" }, myCode), " \u2014 garde-le pr\xE9cieusement pour changer d'appareil."), pendingRestore && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "Restaurer \xAB ", pendingRestore.name, " \xBB \xE9crasera les donn\xE9es actuelles des joueurs pr\xE9sents dans le fichier, pour tout le monde."), /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: () => setPendingRestore(null) }, "Annuler"), /* @__PURE__ */ React.createElement("button", { className: "primary", onClick: () => {
     onRestore(pendingRestore.data);
     setPendingRestore(null);
-  } }, "Restaurer")))), /* @__PURE__ */ React.createElement("div", { className: "stat-grid" }, /* @__PURE__ */ React.createElement(Stat, { label: "Bankroll dispo", value: EUR(s.bankroll), tone: s.bankroll < 0 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "En jeu", value: EUR(s.enJeu) }), /* @__PURE__ */ React.createElement(Stat, { label: "Total investi", value: EUR(s.totalIn) }), /* @__PURE__ */ React.createElement(Stat, { label: "Rendement", value: (s.rendement * 100).toFixed(1) + " %", tone: s.rendement > 0 ? "pos" : s.rendement < 0 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "ROI / mises", value: (s.roi * 100).toFixed(1) + " %", tone: s.roi > 0 ? "pos" : s.roi < 0 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "R\xE9ussite \xB7 hors fun", value: s.winsBase + s.lossesBase > 0 ? Math.round(s.winRate * 100) + " %" : "\u2014" }), /* @__PURE__ */ React.createElement(Stat, { label: "Bilan", value: `${s.wins}V \xB7 ${s.losses}D \xB7 ${s.cashouts}C \xB7 ${s.refunds}R` }), /* @__PURE__ */ React.createElement(Stat, { label: "Cote moyenne", value: s.coteMoy > 0 ? s.coteMoy.toFixed(2) : "\u2014" }), /* @__PURE__ */ React.createElement(Stat, { label: "Tickets", value: String(s.total) }), /* @__PURE__ */ React.createElement(Stat, { label: "S\xE9rie en cours", value: sk.curWin >= 1 ? "🔥 " + sk.curWin + " V" : sk.curLoss >= 1 ? "❄️ " + sk.curLoss + " D" : "\u2014", tone: sk.curWin >= 2 ? "pos" : sk.curLoss >= 2 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "Records s\xE9ries", value: "🔥 " + sk.bestWin + " \xB7 ❄️ " + sk.worstLoss }), /* @__PURE__ */ React.createElement(Stat, { label: "Succ\xE8s", value: Object.keys(badges[player.id] || {}).length + " / " + BADGES.length })), /* @__PURE__ */ React.createElement("h2", { className: "section-title" }, "Succ\xE8s"), /* @__PURE__ */ React.createElement("div", { className: "badge-grid" }, BADGES.map((def) => {
-    const ts = (badges[player.id] || {})[def.id];
-    return /* @__PURE__ */ React.createElement("div", { key: def.id, className: "badge-card" + (ts ? " on" : "") }, /* @__PURE__ */ React.createElement("div", { className: "b-icon" }, def.icon), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "b-title" }, def.title), /* @__PURE__ */ React.createElement("div", { className: "b-desc" }, def.desc), ts ? /* @__PURE__ */ React.createElement("div", { className: "b-date" }, "D\xE9bloqu\xE9 le ", new Date(ts).toLocaleDateString("fr-FR")) : null));
+  } }, "Restaurer")))), /* @__PURE__ */ React.createElement("div", { className: "stat-grid" }, /* @__PURE__ */ React.createElement(Stat, { label: "Bankroll dispo", value: EUR(s.bankroll), tone: s.bankroll < 0 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "En jeu", value: EUR(s.enJeu) }), /* @__PURE__ */ React.createElement(Stat, { label: "Total investi", value: EUR(s.totalIn) }), /* @__PURE__ */ React.createElement(Stat, { label: "Rendement", value: (s.rendement * 100).toFixed(1) + " %", tone: s.rendement > 0 ? "pos" : s.rendement < 0 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "ROI / mises", value: (s.roi * 100).toFixed(1) + " %", tone: s.roi > 0 ? "pos" : s.roi < 0 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "R\xE9ussite \xB7 hors fun", value: s.winsBase + s.lossesBase > 0 ? Math.round(s.winRate * 100) + " %" : "\u2014" }), /* @__PURE__ */ React.createElement(Stat, { label: "Bilan", value: `${s.wins}V \xB7 ${s.losses}D \xB7 ${s.cashouts}C \xB7 ${s.refunds}R` }), /* @__PURE__ */ React.createElement(Stat, { label: "Cote moyenne", value: s.coteMoy > 0 ? s.coteMoy.toFixed(2) : "\u2014" }), /* @__PURE__ */ React.createElement(Stat, { label: "Tickets", value: String(s.total) }), /* @__PURE__ */ React.createElement(Stat, { label: "S\xE9rie en cours", value: sk.curWin >= 1 ? "🔥 " + sk.curWin + " V" : sk.curLoss >= 1 ? "❄️ " + sk.curLoss + " D" : "\u2014", tone: sk.curWin >= 2 ? "pos" : sk.curLoss >= 2 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "Records s\xE9ries", value: "🔥 " + sk.bestWin + " \xB7 ❄️ " + sk.worstLoss }), /* @__PURE__ */ React.createElement(Stat, { label: "Succ\xE8s", value: Object.keys(badges[player.id] || {}).filter((b) => b !== "roi").length + (isKing ? 1 : 0) + " / " + BADGES.length })), /* @__PURE__ */ React.createElement("h2", { className: "section-title" }, "Succ\xE8s"), /* @__PURE__ */ React.createElement("div", { className: "badge-grid" }, BADGES.map((def) => {
+    const ts = def.id === "roi" ? (isKing ? Date.now() : null) : (badges[player.id] || {})[def.id];
+    return /* @__PURE__ */ React.createElement("div", { key: def.id, className: "badge-card" + (ts ? " on" : "") }, /* @__PURE__ */ React.createElement("div", { className: "b-icon" }, def.icon), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "b-title" }, def.title), /* @__PURE__ */ React.createElement("div", { className: "b-desc" }, def.desc), ts ? /* @__PURE__ */ React.createElement("div", { className: "b-date" }, def.id === "roi" ? "Actuellement en t\xEAte \u{1F451}" : "D\xE9bloqu\xE9 le " + new Date(ts).toLocaleDateString("fr-FR")) : null));
   })), series.length >= 2 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "chart-card" }, /* @__PURE__ */ React.createElement("div", { className: "chart-title" }, "Bankroll (\u20AC) \xB7 d\xE9part, d\xE9p\xF4ts et paris r\xE9gl\xE9s"), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 180 }, /* @__PURE__ */ React.createElement(LineChart, { data: series, margin: { top: 8, right: 8, bottom: 0, left: -10 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false, domain: ["auto", "auto"] }), /* @__PURE__ */ React.createElement(
     Tooltip,
     {
@@ -1903,6 +2067,23 @@ const CSS = `
   background:var(--gold);color:#081f14;font-weight:700;font-size:14px;
   border-radius:999px;padding:10px 20px;z-index:50;box-shadow:0 6px 20px rgba(0,0,0,.35);
 }
+
+/* ---- v2 ---- */
+.cal-date{position:sticky;top:52px;z-index:5;background:rgba(11,47,30,.96);padding:8px 0 4px;backdrop-filter:blur(4px)}
+.ticket-meta{margin-top:8px;font-size:11px;color:#7a7a60;line-height:1.5}
+.ticket-meta .lock-match{color:#3c4f42;font-weight:600}
+.ticket-meta .lock.ok{color:#1c7a3d;font-weight:700}
+.ticket-meta .lock.warn{color:#b2392a;font-weight:700}
+.proof-img{cursor:zoom-in}
+.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;z-index:60;padding:18px;cursor:zoom-out}
+.lightbox img{max-width:100%;max-height:100%;border-radius:12px;box-shadow:0 12px 48px rgba(0,0,0,.6)}
+.activity-more{background:none;border:none;color:var(--gold);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;text-align:left;padding:4px 0 0}
+.chip.mini.dark{background:transparent;border:1px solid var(--line);color:var(--chalk-dim)}
+.code-banner{background:rgba(245,197,67,.1);border:1px solid rgba(245,197,67,.55);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px;margin-bottom:12px;font-size:13.5px}
+.code-banner b{font-family:'Saira Condensed',sans-serif;font-size:26px;letter-spacing:.2em;color:var(--gold)}
+.code-banner .secondary{align-self:flex-start;padding:8px 16px;font-size:13px}
+.claim-link{background:none;border:none;color:var(--chalk-dim);text-decoration:underline;font-size:13px;cursor:pointer;font-family:inherit;text-align:center;padding:4px}
+.code-inline{font-family:'Saira Condensed',sans-serif;letter-spacing:.15em;color:var(--gold);font-size:15px;font-weight:700}
 `;
 const rootEl = document.getElementById("root");
 ReactDOM.createRoot(rootEl).render(React.createElement(App));
