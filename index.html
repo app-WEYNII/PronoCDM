@@ -1050,7 +1050,7 @@ function App() {
       if (proof) await store.delete("proofs:" + id, true);
       return;
     }
-    setBetsByPlayer((prev) => ({ ...prev, [me]: [newBet, ...prev[me] || []] }));
+    setBetsByPlayer((prev) => ({ ...prev, [me]: [newBet, ...(prev[me] || []).filter((b) => b.id !== id)] }));
     showToast("Ticket enregistr\xE9 \u{1F39F}\uFE0F");
     setTab("paris");
   }
