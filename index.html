@@ -13,7 +13,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="PRONO" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <style>html,body{margin:0;background:#0b2f1e}</style>
+  <style>html,body{margin:0;background:#0b2f1e;-webkit-text-size-adjust:100%;text-size-adjust:100%}</style>
 </head>
 <body>
   <div id="root"></div>
@@ -383,6 +383,13 @@ function bankrollSeries(player, bets) {
   return data;
 }
 const PLAYER_COLORS = ["#f5c543", "#5cc97a", "#e5533c", "#8fa6c9", "#c97ae0", "#7ad6e0", "#e0a37a", "#aee07a"];
+/* Couleur stable par joueur : ordre par createdAt (un nouveau joueur s'ajoute en fin sans décaler les autres). */
+function playerColorMap(players) {
+  const ordered = Object.keys(players || {}).sort((a, b) => ((players[a] && players[a].createdAt || 0) - (players[b] && players[b].createdAt || 0)) || (a < b ? -1 : a > b ? 1 : 0));
+  const map = {};
+  ordered.forEach((id, idx) => { map[id] = PLAYER_COLORS[idx % PLAYER_COLORS.length]; });
+  return map;
+}
 function buildActivity(players, betsByPlayer, n = 4) {
   const ev = [];
   for (const [pid, bets] of Object.entries(betsByPlayer)) {
@@ -1290,6 +1297,7 @@ function ClaimBox({ players = [], onClaim }) {
 function Leaderboard({ ranking, me, onSelect, players = {}, activity = [], comparison = null, comparisonPct = null, hall = [], badges = {} }) {
   const [sortBy, setSortBy] = useState("rendement");
   const [actAll, setActAll] = useState(false);
+  const colorMap = playerColorMap(players);
   if (ranking.length === 0)
     return /* @__PURE__ */ React.createElement(Empty, { icon: "\u{1F3DF}\uFE0F", text: "Personne sur le terrain pour l'instant." });
   const kingId = ranking[0].player.id;
@@ -1306,11 +1314,11 @@ function Leaderboard({ ranking, me, onSelect, players = {}, activity = [], compa
       key: pid,
       type: "monotone",
       dataKey: pid,
-      stroke: PLAYER_COLORS[i % PLAYER_COLORS.length],
+      stroke: colorMap[pid] || PLAYER_COLORS[0],
       strokeWidth: 2.5,
       dot: false
     }
-  )))), /* @__PURE__ */ React.createElement("div", { className: "legend-row" }, comparison.pids.map((pid, i) => /* @__PURE__ */ React.createElement("span", { key: pid, className: "legend-item" }, /* @__PURE__ */ React.createElement("i", { style: { background: PLAYER_COLORS[i % PLAYER_COLORS.length] } }), players[pid] ? players[pid].emoji + " " + players[pid].name : pid)))), comparisonPct && /* @__PURE__ */ React.createElement("div", { className: "chart-card" }, /* @__PURE__ */ React.createElement("div", { className: "chart-title" }, "La course \xB7 rendement (%) par joueur"), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 200 }, /* @__PURE__ */ React.createElement(LineChart, { data: comparisonPct.data, margin: { top: 8, right: 8, bottom: 0, left: -16 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false, domain: ["auto", "auto"] }), /* @__PURE__ */ React.createElement(
+  )))), /* @__PURE__ */ React.createElement("div", { className: "legend-row" }, comparison.pids.map((pid, i) => /* @__PURE__ */ React.createElement("span", { key: pid, className: "legend-item" }, /* @__PURE__ */ React.createElement("i", { style: { background: colorMap[pid] || PLAYER_COLORS[0] } }), players[pid] ? players[pid].emoji + " " + players[pid].name : pid)))), comparisonPct && /* @__PURE__ */ React.createElement("div", { className: "chart-card" }, /* @__PURE__ */ React.createElement("div", { className: "chart-title" }, "La course \xB7 rendement (%) par joueur"), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 200 }, /* @__PURE__ */ React.createElement(LineChart, { data: comparisonPct.data, margin: { top: 8, right: 8, bottom: 0, left: -16 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false, domain: ["auto", "auto"] }), /* @__PURE__ */ React.createElement(
     Tooltip,
     {
       formatter: (v, key) => [v.toLocaleString("fr-FR") + " %", players[key] ? players[key].name : key],
@@ -1322,11 +1330,11 @@ function Leaderboard({ ranking, me, onSelect, players = {}, activity = [], compa
       key: pid,
       type: "monotone",
       dataKey: pid,
-      stroke: PLAYER_COLORS[i % PLAYER_COLORS.length],
+      stroke: colorMap[pid] || PLAYER_COLORS[0],
       strokeWidth: 2.5,
       dot: false
     }
-  )))), /* @__PURE__ */ React.createElement("div", { className: "legend-row" }, comparisonPct.pids.map((pid, i) => /* @__PURE__ */ React.createElement("span", { key: pid, className: "legend-item" }, /* @__PURE__ */ React.createElement("i", { style: { background: PLAYER_COLORS[i % PLAYER_COLORS.length] } }), players[pid] ? players[pid].emoji + " " + players[pid].name : pid)))));
+  )))), /* @__PURE__ */ React.createElement("div", { className: "legend-row" }, comparisonPct.pids.map((pid, i) => /* @__PURE__ */ React.createElement("span", { key: pid, className: "legend-item" }, /* @__PURE__ */ React.createElement("i", { style: { background: colorMap[pid] || PLAYER_COLORS[0] } }), players[pid] ? players[pid].emoji + " " + players[pid].name : pid)))));
 }
 function BetsFeed({ bets, players, me, onStatut, onDelete, reactions = {}, onReact, comments = {}, onComment, onDeleteComment }) {
   const [filter, setFilter] = useState("tous");
@@ -2049,7 +2057,7 @@ const CSS = `
 .comment-del{margin-left:auto;background:none;border:none;color:#b2392a;cursor:pointer;font-size:13px;padding:0 2px;line-height:1}
 .comment-text{font-size:13.5px;margin-top:3px;white-space:pre-wrap;word-break:break-word}
 .comment-input{display:flex;gap:8px;align-items:center}
-.comment-input input{flex:1;background:#fff;border:1px solid #cfc9ad;border-radius:999px;padding:9px 14px;font-size:15px;font-family:inherit;color:#13231a;min-width:0}
+.comment-input input{flex:1;background:#fff;border:1px solid #cfc9ad;border-radius:999px;padding:9px 14px;font-size:16px;font-family:inherit;color:#13231a;min-width:0}
 .comment-input input:focus{outline:2px solid var(--gold)}
 .comment-send{background:#13231a;color:#f7f4e8;border:none;border-radius:999px;width:38px;height:38px;font-size:14px;cursor:pointer;flex-shrink:0}
 .comment-send:disabled{opacity:.35;cursor:not-allowed}
