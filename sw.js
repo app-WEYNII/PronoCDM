@@ -1,4 +1,4 @@
-const CACHE = "prono-v14";
+const CACHE = "prono-v15";
 const ASSETS = [
   "./",
   "./index.html",
