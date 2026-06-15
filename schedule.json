@@ -1,0 +1,506 @@
+[
+ {
+  "mk": "m0",
+  "date": "2026-06-11",
+  "time": "21:00",
+  "home": "Mexique",
+  "away": "Afrique du Sud"
+ },
+ {
+  "mk": "m1",
+  "date": "2026-06-12",
+  "time": "04:00",
+  "home": "Corée du Sud",
+  "away": "République tchèque"
+ },
+ {
+  "mk": "m2",
+  "date": "2026-06-12",
+  "time": "21:00",
+  "home": "Canada",
+  "away": "Bosnie-Herzégovine"
+ },
+ {
+  "mk": "m3",
+  "date": "2026-06-13",
+  "time": "03:00",
+  "home": "États-Unis",
+  "away": "Paraguay"
+ },
+ {
+  "mk": "m4",
+  "date": "2026-06-13",
+  "time": "21:00",
+  "home": "Qatar",
+  "away": "Suisse"
+ },
+ {
+  "mk": "m5",
+  "date": "2026-06-14",
+  "time": "00:00",
+  "home": "Brésil",
+  "away": "Maroc"
+ },
+ {
+  "mk": "m6",
+  "date": "2026-06-14",
+  "time": "03:00",
+  "home": "Haïti",
+  "away": "Écosse"
+ },
+ {
+  "mk": "m7",
+  "date": "2026-06-14",
+  "time": "06:00",
+  "home": "Australie",
+  "away": "Turquie"
+ },
+ {
+  "mk": "m8",
+  "date": "2026-06-14",
+  "time": "19:00",
+  "home": "Allemagne",
+  "away": "Curaçao"
+ },
+ {
+  "mk": "m9",
+  "date": "2026-06-14",
+  "time": "22:00",
+  "home": "Pays-Bas",
+  "away": "Japon"
+ },
+ {
+  "mk": "m10",
+  "date": "2026-06-15",
+  "time": "01:00",
+  "home": "Côte d'Ivoire",
+  "away": "Équateur"
+ },
+ {
+  "mk": "m11",
+  "date": "2026-06-15",
+  "time": "04:00",
+  "home": "Suède",
+  "away": "Tunisie"
+ },
+ {
+  "mk": "m12",
+  "date": "2026-06-15",
+  "time": "18:00",
+  "home": "Espagne",
+  "away": "Cap-Vert"
+ },
+ {
+  "mk": "m13",
+  "date": "2026-06-15",
+  "time": "21:00",
+  "home": "Belgique",
+  "away": "Égypte"
+ },
+ {
+  "mk": "m14",
+  "date": "2026-06-16",
+  "time": "00:00",
+  "home": "Arabie saoudite",
+  "away": "Uruguay"
+ },
+ {
+  "mk": "m15",
+  "date": "2026-06-16",
+  "time": "03:00",
+  "home": "Iran",
+  "away": "Nouvelle-Zélande"
+ },
+ {
+  "mk": "m16",
+  "date": "2026-06-16",
+  "time": "21:00",
+  "home": "France",
+  "away": "Sénégal"
+ },
+ {
+  "mk": "m17",
+  "date": "2026-06-17",
+  "time": "00:00",
+  "home": "Irak",
+  "away": "Norvège"
+ },
+ {
+  "mk": "m18",
+  "date": "2026-06-17",
+  "time": "03:00",
+  "home": "Argentine",
+  "away": "Algérie"
+ },
+ {
+  "mk": "m19",
+  "date": "2026-06-17",
+  "time": "06:00",
+  "home": "Autriche",
+  "away": "Jordanie"
+ },
+ {
+  "mk": "m20",
+  "date": "2026-06-17",
+  "time": "19:00",
+  "home": "Portugal",
+  "away": "RD Congo"
+ },
+ {
+  "mk": "m21",
+  "date": "2026-06-17",
+  "time": "22:00",
+  "home": "Angleterre",
+  "away": "Croatie"
+ },
+ {
+  "mk": "m22",
+  "date": "2026-06-18",
+  "time": "01:00",
+  "home": "Ghana",
+  "away": "Panama"
+ },
+ {
+  "mk": "m23",
+  "date": "2026-06-18",
+  "time": "04:00",
+  "home": "Ouzbékistan",
+  "away": "Colombie"
+ },
+ {
+  "mk": "m24",
+  "date": "2026-06-18",
+  "time": "18:00",
+  "home": "République tchèque",
+  "away": "Afrique du Sud"
+ },
+ {
+  "mk": "m25",
+  "date": "2026-06-18",
+  "time": "21:00",
+  "home": "Suisse",
+  "away": "Bosnie-Herzégovine"
+ },
+ {
+  "mk": "m26",
+  "date": "2026-06-19",
+  "time": "00:00",
+  "home": "Canada",
+  "away": "Qatar"
+ },
+ {
+  "mk": "m27",
+  "date": "2026-06-19",
+  "time": "03:00",
+  "home": "Mexique",
+  "away": "Corée du Sud"
+ },
+ {
+  "mk": "m28",
+  "date": "2026-06-19",
+  "time": "21:00",
+  "home": "États-Unis",
+  "away": "Australie"
+ },
+ {
+  "mk": "m29",
+  "date": "2026-06-20",
+  "time": "00:00",
+  "home": "Écosse",
+  "away": "Maroc"
+ },
+ {
+  "mk": "m30",
+  "date": "2026-06-20",
+  "time": "02:30",
+  "home": "Brésil",
+  "away": "Haïti"
+ },
+ {
+  "mk": "m31",
+  "date": "2026-06-20",
+  "time": "05:00",
+  "home": "Turquie",
+  "away": "Paraguay"
+ },
+ {
+  "mk": "m32",
+  "date": "2026-06-20",
+  "time": "19:00",
+  "home": "Pays-Bas",
+  "away": "Suède"
+ },
+ {
+  "mk": "m33",
+  "date": "2026-06-20",
+  "time": "22:00",
+  "home": "Allemagne",
+  "away": "Côte d'Ivoire"
+ },
+ {
+  "mk": "m34",
+  "date": "2026-06-21",
+  "time": "02:00",
+  "home": "Équateur",
+  "away": "Curaçao"
+ },
+ {
+  "mk": "m35",
+  "date": "2026-06-21",
+  "time": "06:00",
+  "home": "Tunisie",
+  "away": "Japon"
+ },
+ {
+  "mk": "m36",
+  "date": "2026-06-21",
+  "time": "18:00",
+  "home": "Espagne",
+  "away": "Arabie saoudite"
+ },
+ {
+  "mk": "m37",
+  "date": "2026-06-21",
+  "time": "21:00",
+  "home": "Belgique",
+  "away": "Iran"
+ },
+ {
+  "mk": "m38",
+  "date": "2026-06-22",
+  "time": "00:00",
+  "home": "Uruguay",
+  "away": "Cap-Vert"
+ },
+ {
+  "mk": "m39",
+  "date": "2026-06-22",
+  "time": "03:00",
+  "home": "Nouvelle-Zélande",
+  "away": "Égypte"
+ },
+ {
+  "mk": "m40",
+  "date": "2026-06-22",
+  "time": "19:00",
+  "home": "Argentine",
+  "away": "Autriche"
+ },
+ {
+  "mk": "m41",
+  "date": "2026-06-22",
+  "time": "23:00",
+  "home": "France",
+  "away": "Irak"
+ },
+ {
+  "mk": "m42",
+  "date": "2026-06-23",
+  "time": "02:00",
+  "home": "Norvège",
+  "away": "Sénégal"
+ },
+ {
+  "mk": "m43",
+  "date": "2026-06-23",
+  "time": "05:00",
+  "home": "Jordanie",
+  "away": "Algérie"
+ },
+ {
+  "mk": "m44",
+  "date": "2026-06-23",
+  "time": "19:00",
+  "home": "Portugal",
+  "away": "Ouzbékistan"
+ },
+ {
+  "mk": "m45",
+  "date": "2026-06-23",
+  "time": "22:00",
+  "home": "Angleterre",
+  "away": "Ghana"
+ },
+ {
+  "mk": "m46",
+  "date": "2026-06-24",
+  "time": "01:00",
+  "home": "Panama",
+  "away": "Croatie"
+ },
+ {
+  "mk": "m47",
+  "date": "2026-06-24",
+  "time": "04:00",
+  "home": "Colombie",
+  "away": "RD Congo"
+ },
+ {
+  "mk": "m48",
+  "date": "2026-06-24",
+  "time": "21:00",
+  "home": "Suisse",
+  "away": "Canada"
+ },
+ {
+  "mk": "m49",
+  "date": "2026-06-24",
+  "time": "21:00",
+  "home": "Bosnie-Herzégovine",
+  "away": "Qatar"
+ },
+ {
+  "mk": "m50",
+  "date": "2026-06-25",
+  "time": "00:00",
+  "home": "Écosse",
+  "away": "Brésil"
+ },
+ {
+  "mk": "m51",
+  "date": "2026-06-25",
+  "time": "00:00",
+  "home": "Maroc",
+  "away": "Haïti"
+ },
+ {
+  "mk": "m52",
+  "date": "2026-06-25",
+  "time": "03:00",
+  "home": "République tchèque",
+  "away": "Mexique"
+ },
+ {
+  "mk": "m53",
+  "date": "2026-06-25",
+  "time": "03:00",
+  "home": "Afrique du Sud",
+  "away": "Corée du Sud"
+ },
+ {
+  "mk": "m54",
+  "date": "2026-06-25",
+  "time": "22:00",
+  "home": "Curaçao",
+  "away": "Côte d'Ivoire"
+ },
+ {
+  "mk": "m55",
+  "date": "2026-06-25",
+  "time": "22:00",
+  "home": "Équateur",
+  "away": "Allemagne"
+ },
+ {
+  "mk": "m56",
+  "date": "2026-06-26",
+  "time": "01:00",
+  "home": "Japon",
+  "away": "Suède"
+ },
+ {
+  "mk": "m57",
+  "date": "2026-06-26",
+  "time": "01:00",
+  "home": "Tunisie",
+  "away": "Pays-Bas"
+ },
+ {
+  "mk": "m58",
+  "date": "2026-06-26",
+  "time": "04:00",
+  "home": "Turquie",
+  "away": "États-Unis"
+ },
+ {
+  "mk": "m59",
+  "date": "2026-06-26",
+  "time": "04:00",
+  "home": "Paraguay",
+  "away": "Australie"
+ },
+ {
+  "mk": "m60",
+  "date": "2026-06-26",
+  "time": "21:00",
+  "home": "Norvège",
+  "away": "France"
+ },
+ {
+  "mk": "m61",
+  "date": "2026-06-26",
+  "time": "21:00",
+  "home": "Sénégal",
+  "away": "Irak"
+ },
+ {
+  "mk": "m62",
+  "date": "2026-06-27",
+  "time": "02:00",
+  "home": "Cap-Vert",
+  "away": "Arabie saoudite"
+ },
+ {
+  "mk": "m63",
+  "date": "2026-06-27",
+  "time": "02:00",
+  "home": "Uruguay",
+  "away": "Espagne"
+ },
+ {
+  "mk": "m64",
+  "date": "2026-06-27",
+  "time": "05:00",
+  "home": "Égypte",
+  "away": "Iran"
+ },
+ {
+  "mk": "m65",
+  "date": "2026-06-27",
+  "time": "05:00",
+  "home": "Nouvelle-Zélande",
+  "away": "Belgique"
+ },
+ {
+  "mk": "m66",
+  "date": "2026-06-27",
+  "time": "23:00",
+  "home": "Panama",
+  "away": "Angleterre"
+ },
+ {
+  "mk": "m67",
+  "date": "2026-06-27",
+  "time": "23:00",
+  "home": "Croatie",
+  "away": "Ghana"
+ },
+ {
+  "mk": "m68",
+  "date": "2026-06-28",
+  "time": "01:30",
+  "home": "Colombie",
+  "away": "Portugal"
+ },
+ {
+  "mk": "m69",
+  "date": "2026-06-28",
+  "time": "01:30",
+  "home": "RD Congo",
+  "away": "Ouzbékistan"
+ },
+ {
+  "mk": "m70",
+  "date": "2026-06-28",
+  "time": "04:00",
+  "home": "Algérie",
+  "away": "Autriche"
+ },
+ {
+  "mk": "m71",
+  "date": "2026-06-28",
+  "time": "04:00",
+  "home": "Jordanie",
+  "away": "Argentine"
+ }
+]

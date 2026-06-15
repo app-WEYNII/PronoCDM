@@ -1,0 +1,26 @@
+# À placer dans ton repo sous : .github/workflows/settle.yml
+name: Settle matches
+
+on:
+  schedule:
+    - cron: '*/20 * * * *'   # toutes les 20 min (best-effort GitHub ; largement suffisant pour acter un score final)
+  workflow_dispatch: {}       # + bouton "Run workflow" pour tester à la main
+
+# Évite que deux exécutions se chevauchent
+concurrency:
+  group: settle
+  cancel-in-progress: false
+
+jobs:
+  settle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install firebase-admin@12 --no-save
+      - run: node settle.mjs
+        env:
+          FB_SA: ${{ secrets.FB_SA }}
+          API_KEY: ${{ secrets.API_KEY }}
