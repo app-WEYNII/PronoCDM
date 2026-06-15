@@ -217,11 +217,10 @@ function CalendarView({ me, pronos = {}, results = {} }) {
             return React.createElement("div", { key: idx, className: "cal-item" },
               React.createElement("div", { className: "cal-match" + (m[0] < todayISO && status === "FT" ? " past" : "") },
                 React.createElement("span", { className: "cal-time" }, m[1]),
-                React.createElement("span", { className: "cal-teams" }, m[5] ? React.createElement(React.Fragment, null, teamLabel(m[4]), React.createElement("span", { className: "cal-vs" }, "—"), teamLabel(m[5])) : m[4]),
+                React.createElement("span", { className: "cal-teams" }, m[5] ? React.createElement(React.Fragment, null, teamLabel(m[4]), hasScore ? React.createElement("span", { className: "cal-inscore" }, (+res.a) + " – " + (+res.b)) : React.createElement("span", { className: "cal-vs" }, "—"), teamLabel(m[5])) : m[4]),
                 React.createElement("span", { className: "cal-phase" }, m[2] === "G" ? "Gr. " + m[3] : CDM_PHASES[m[2]])),
-              React.createElement("div", { className: "cal-score" },
-                React.createElement("span", { className: "cal-status " + sMeta.cls }, (status === "LIVE" || status === "HT") && React.createElement("span", { className: "live-dot" }), sMeta.label),
-                hasScore && React.createElement("span", { className: "cal-scoreline" }, (+res.a) + " – " + (+res.b))));
+              (status === "LIVE" || status === "HT" || status === "PST" || status === "CANC") && React.createElement("div", { className: "cal-score" },
+                React.createElement("span", { className: "cal-status " + sMeta.cls }, (status === "LIVE" || status === "HT") && React.createElement("span", { className: "live-dot" }), sMeta.label)));
           }))),
     React.createElement("p", { className: "muted center small" }, "Horaires en heure française. Section informative : scores et statuts des matchs. Les pronostics se saisissent dans la sous-catégorie « Pronostics »."));
 }
@@ -2765,6 +2764,7 @@ const CSS = `
 .cal-status.ft{color:var(--won);border-color:rgba(92,201,122,.45);background:rgba(92,201,122,.1)}
 .cal-status.pst,.cal-status.canc{color:#e0b15c;border-color:rgba(224,177,92,.45);background:rgba(224,177,92,.1)}
 .cal-scoreline{font-family:'Saira Condensed',sans-serif;font-weight:800;font-size:16px;font-variant-numeric:tabular-nums}
+.cal-inscore{font-family:'Saira Condensed',sans-serif;font-weight:800;font-size:15px;color:var(--gold);padding:0 9px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .live-dot{width:7px;height:7px;border-radius:50%;background:#ff6b53;display:inline-block;animation:pulse 1.4s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 @media (prefers-reduced-motion: reduce){.live-dot{animation:none}}
