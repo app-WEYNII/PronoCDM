@@ -37,6 +37,29 @@
       messagingSenderId: "151799178579",
       appId: "1:151799178579:web:241b72ba67258c3116eda6",
     };
+
+    /* ⚽ (Optionnel) Récupération automatique des scores en direct.
+       Désactivé par défaut : un appel direct depuis le navigateur expose la clé API
+       et est souvent bloqué par CORS. La méthode recommandée est un petit proxy
+       (Cloudflare Worker / Firebase Function) qui ajoute la clé côté serveur.
+       Tant que ce bloc est désactivé, les scores se saisissent manuellement
+       (onglet Pronostics → « En cours / à noter ») et tout le reste fonctionne.
+
+       Contrat attendu du proxy : GET <proxyUrl>?fixture=<id> -> JSON
+       { home: <nb>, away: <nb>, status: "NS|LIVE|HT|FT|PST|CANC" }
+       (ou fournis une fonction parse(json) qui renvoie cet objet).
+       Renseigne ensuite la correspondance fixtures : { "m0": 12345, "m1": 12346, ... }
+       où la clé est l'index du match dans CDM_MATCHES (préfixé par « m »). */
+    window.FOOTBALL_API = {
+      enabled: false,
+      provider: "api-football",
+      proxyUrl: "",        // ex : "https://ton-proxy.workers.dev/score"
+      apiUrl: "",          // alternative directe (déconseillé : clé exposée + CORS)
+      apiKeyHeader: "",    // ex : "x-apisports-key" si appel direct
+      apiKey: "",          // laissée vide en production côté client
+      parse: null,         // (json) => ({ home, away, status }) si réponse non normalisée
+      fixtures: {}         // { "m0": 1208123, "m16": 1208139, ... }
+    };
   </script>
 
   <script>
@@ -155,36 +178,54 @@ const CDM_MATCHES = [
   ["2026-07-18", "23:00", "P", null, "Match pour la 3e place", null],
   ["2026-07-19", "21:00", "F", null, "Finale — MetLife Stadium, New York", null]
 ];
-function CalendarView() {
+function CalendarView({ me, pronos = {}, results = {} }) {
   const [filtre, setFiltre] = useState("avenir");
   const now = new Date();
+  const nowMs = now.getTime();
   const todayISO = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
-  const matches = [...CDM_MATCHES].sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1])).filter((m) => {
+  const matches = CDM_MATCHES.map((m, idx) => ({ m, idx })).sort((a, b) => (a.m[0] + a.m[1]).localeCompare(b.m[0] + b.m[1])).filter(({ m }) => {
     if (filtre === "avenir") return m[0] >= todayISO;
     if (filtre === "all") return true;
     if (filtre === "DF") return m[2] === "D" || m[2] === "P" || m[2] === "F";
     return m[2] === filtre;
   });
   const byDate = [];
-  for (const m of matches) {
+  for (const it of matches) {
     const last = byDate[byDate.length - 1];
-    if (last && last.date === m[0]) last.items.push(m);
-    else byDate.push({ date: m[0], items: [m] });
+    if (last && last.date === it.m[0]) last.items.push(it);
+    else byDate.push({ date: it.m[0], items: [it] });
   }
   const fmtDate = (d) => {
     const str = new Date(d + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
     return str.charAt(0).toUpperCase() + str.slice(1);
   };
-  return /* @__PURE__ */ React.createElement("div", { className: "stack" }, /* @__PURE__ */ React.createElement("h2", { className: "section-title" }, "Calendrier CDM 2026"), /* @__PURE__ */ React.createElement("div", { className: "filter-row scroll" }, [
-    ["avenir", "À venir"],
-    ["all", "Tous"],
-    ["G", "Groupes"],
-    ["S", "16es"],
-    ["H", "8es"],
-    ["Q", "Quarts"],
-    ["DF", "Dernier carré"]
-  ].map(([id, label]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "chip" + (filtre === id ? " sel" : ""), onClick: () => setFiltre(id) }, label))), byDate.length === 0 ? /* @__PURE__ */ React.createElement(Empty, { icon: "📅", text: "Aucun match pour ce filtre." }) : byDate.map(({ date, items }) => /* @__PURE__ */ React.createElement("div", { key: date, className: "cal-day" }, /* @__PURE__ */ React.createElement("div", { className: "cal-date" + (date === todayISO ? " today" : "") }, fmtDate(date), date === todayISO ? " · Aujourd'hui ⚽" : ""), items.map((m, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "cal-match" + (m[0] < todayISO ? " past" : "") }, /* @__PURE__ */ React.createElement("span", { className: "cal-time" }, m[1]), /* @__PURE__ */ React.createElement("span", { className: "cal-teams" }, m[5] ? /* @__PURE__ */ React.createElement(React.Fragment, null, teamLabel(m[4]), /* @__PURE__ */ React.createElement("span", { className: "cal-vs" }, "—"), teamLabel(m[5])) : m[4]), /* @__PURE__ */ React.createElement("span", { className: "cal-phase" }, m[2] === "G" ? "Gr. " + m[3] : CDM_PHASES[m[2]]))))), /* @__PURE__ */ React.createElement("p", { className: "muted center small" }, "Horaires en heure française. Les affiches des phases finales se précisent au fil de la compétition."));
+  return React.createElement("div", { className: "stack" },
+    React.createElement("h2", { className: "section-title" }, "Calendrier CDM 2026"),
+    React.createElement("div", { className: "filter-row scroll" }, [
+      ["avenir", "À venir"], ["all", "Tous"], ["G", "Groupes"], ["S", "16es"], ["H", "8es"], ["Q", "Quarts"], ["DF", "Dernier carré"]
+    ].map(([id, label]) => React.createElement("button", { key: id, className: "chip" + (filtre === id ? " sel" : ""), onClick: () => setFiltre(id) }, label))),
+    byDate.length === 0
+      ? React.createElement(Empty, { icon: "📅", text: "Aucun match pour ce filtre." })
+      : byDate.map(({ date, items }) => React.createElement("div", { key: date, className: "cal-day" },
+          React.createElement("div", { className: "cal-date" + (date === todayISO ? " today" : "") }, fmtDate(date), date === todayISO ? " · Aujourd'hui ⚽" : ""),
+          items.map(({ m, idx }) => {
+            const mk = matchKey(idx);
+            const res = results[mk];
+            const status = matchStatusOf(m, res, nowMs);
+            const sMeta = MATCH_STATUS[status] || MATCH_STATUS.NS;
+            const hasScore = res && Number.isFinite(+res.a) && Number.isFinite(+res.b);
+            return React.createElement("div", { key: idx, className: "cal-item" },
+              React.createElement("div", { className: "cal-match" + (m[0] < todayISO && status === "FT" ? " past" : "") },
+                React.createElement("span", { className: "cal-time" }, m[1]),
+                React.createElement("span", { className: "cal-teams" }, m[5] ? React.createElement(React.Fragment, null, teamLabel(m[4]), React.createElement("span", { className: "cal-vs" }, "—"), teamLabel(m[5])) : m[4]),
+                React.createElement("span", { className: "cal-phase" }, m[2] === "G" ? "Gr. " + m[3] : CDM_PHASES[m[2]])),
+              React.createElement("div", { className: "cal-score" },
+                React.createElement("span", { className: "cal-status " + sMeta.cls }, (status === "LIVE" || status === "HT") && React.createElement("span", { className: "live-dot" }), sMeta.label),
+                hasScore && React.createElement("span", { className: "cal-scoreline" }, (+res.a) + " – " + (+res.b))));
+          }))),
+    React.createElement("p", { className: "muted center small" }, "Horaires en heure française. Section informative : scores et statuts des matchs. Les pronostics se saisissent dans la sous-catégorie « Pronostics »."));
 }
+
 const AVATARS = ["\u26BD", "\u{1F981}", "\u{1F43A}", "\u{1F985}", "\u{1F419}", "\u{1F525}", "\u{1F340}", "\u{1F3AF}", "\u{1F988}", "\u{1F451}", "\u{1F0CF}", "\u{1F680}"];
 const fb = (() => {
   try {
@@ -243,6 +284,7 @@ const store = {
       await fb.ref(keyToPath(key)).set(value);
       return true;
     } catch (e) {
+      console.warn("[store] échec d'écriture sur «" + key + "» :", e && e.message ? e.message : e, "\u2192 vérifie les règles Firebase Realtime Database (lecture/écriture des nœuds pronos et results).");
       return false;
     }
   },
@@ -302,35 +344,34 @@ function computeStreaks(bets) {
   return { curWin, curLoss, bestWin, worstLoss };
 }
 function computeStats(player, bets) {
-  let settledProfit = 0, pendingStake = 0, wins = 0, losses = 0, winsBase = 0, lossesBase = 0, refunds = 0, cashouts = 0, pendingCount = 0, stakedSettled = 0, cotesSum = 0, cotesN = 0;
+  let settledProfit = 0, pendingStake = 0, wins = 0, losses = 0, winsBase = 0, lossesBase = 0, refunds = 0, cashouts = 0, pendingCount = 0, stakedSettled = 0, cotesSum = 0, cotesN = 0, winsWR = 0, lossesWR = 0, coteWinSum = 0, coteWinN = 0;
   for (const b of bets) {
     const mise = +b.mise || 0;
     const cote = +b.cote || 0;
     const fun = b.categorie === "fun";
-    if (b.statut === "gagne") {
-      settledProfit += betProfit(b);
-      wins++;
-      if (!fun) winsBase++;
+    const st = b.statut;
+    if (st === "gagne" || st === "perdu" || st === "cloture") {
+      /* Tous les paris réglés (gagné, perdu, clôturé) comptent dans le profit, la mise réglée et la cote moyenne jouée. */
+      const pr = betProfit(b);
+      settledProfit += pr;
       stakedSettled += mise;
-      if (cote > 0) {
-        cotesSum += cote;
-        cotesN++;
+      if (cote > 0) { cotesSum += cote; cotesN++; }
+      /* Un clôturé est traité selon son résultat réel : profit positif = victoire, profit négatif = défaite. */
+      const isWin = st === "gagne" || (st === "cloture" && pr > 0);
+      const isLoss = st === "perdu" || (st === "cloture" && pr < 0);
+      if (st === "cloture") cashouts++;
+      if (isWin) {
+        wins++;
+        if (!fun) { winsBase++; winsWR++; }
+        if (cote > 0) { coteWinSum += cote; coteWinN++; } /* cote moyenne gagnante : paris gagnés + clôturés positifs */
+      } else if (isLoss) {
+        losses++;
+        if (!fun) { lossesBase++; lossesWR++; }
       }
-    } else if (b.statut === "perdu") {
-      settledProfit += betProfit(b);
-      losses++;
-      if (!fun) lossesBase++;
-      stakedSettled += mise;
-      if (cote > 0) {
-        cotesSum += cote;
-        cotesN++;
-      }
-    } else if (b.statut === "cloture") {
-      settledProfit += betProfit(b);
-      stakedSettled += mise;
-      cashouts++;
-    } else if (b.statut === "rembourse") {
+    } else if (st === "rembourse") {
       refunds++;
+    } else if (st === "annule") {
+      /* ticket annulé : ignoré dans toutes les statistiques */
     } else {
       pendingStake += mise;
       pendingCount++;
@@ -354,9 +395,12 @@ function computeStats(player, bets) {
     rendement: totalIn > 0 ? settledProfit / totalIn : 0,
     roi: stakedSettled > 0 ? settledProfit / stakedSettled : 0,
     coteMoy: cotesN > 0 ? cotesSum / cotesN : 0,
+    coteMoyWin: coteWinN > 0 ? coteWinSum / coteWinN : 0,
     winsBase,
     lossesBase,
-    winRate: winsBase + lossesBase > 0 ? winsBase / (winsBase + lossesBase) : 0
+    winsWR,
+    lossesWR,
+    winRate: winsWR + lossesWR > 0 ? winsWR / (winsWR + lossesWR) : 0
   };
 }
 function bankrollSeries(player, bets) {
@@ -390,6 +434,11 @@ function playerColorMap(players) {
   ordered.forEach((id, idx) => { map[id] = PLAYER_COLORS[idx % PLAYER_COLORS.length]; });
   return map;
 }
+/* Ordonne une liste d'identifiants joueurs dans le MÊME ordre que playerColorMap (par createdAt),
+   pour que l'ordre des courbes, les couleurs et la légende soient toujours cohérents et associés au bon joueur. */
+function orderPids(players, ids) {
+  return [...new Set(ids)].filter((id) => players && players[id]).sort((a, b) => (((players[a] || {}).createdAt || 0) - ((players[b] || {}).createdAt || 0)) || (a < b ? -1 : a > b ? 1 : 0));
+}
 function buildActivity(players, betsByPlayer, n = 4) {
   const ev = [];
   for (const [pid, bets] of Object.entries(betsByPlayer)) {
@@ -420,7 +469,7 @@ function buildComparison(players, betsByPlayer) {
   }
   if (events.length < 2) return null;
   events.sort((a, b) => a.t - b.t);
-  const pids = [...new Set(events.map((e) => e.pid))];
+  const pids = orderPids(players, events.map((e) => e.pid));
   const cums = {};
   const data = [{ label: "D\xE9part", ...Object.fromEntries(pids.map((id) => [id, 0])) }];
   for (const e of events) {
@@ -441,7 +490,7 @@ function buildComparisonPct(players, betsByPlayer) {
     }
   }
   if (settled.length < 2) return null;
-  const pids = [...new Set(settled.map((e) => e.pid))];
+  const pids = orderPids(players, settled.map((e) => e.pid));
   const events = [...settled];
   for (const pid of pids) {
     for (const d of players[pid].deposits || []) events.push({ pid, t: +d.at || 0, dP: 0, dIn: +d.amount || 0 });
@@ -513,6 +562,124 @@ function buildHallOfFame(players, betsByPlayer) {
   if (rat) out.push({ icon: "🐀", title: "Plus gros montant redéposé", who: rat.p, value: EUR(rat.v), detail: null });
   return out;
 }
+function matchKey(i) { return "m" + i; }
+/* Statuts de match (compatibles avec une API football et la saisie manuelle).
+   NS=non commencé · LIVE=en cours · HT=mi-temps · FT=terminé · PST=reporté · CANC=annulé. */
+const MATCH_STATUS = {
+  NS: { label: "À venir", cls: "ns" },
+  LIVE: { label: "En cours", cls: "live" },
+  HT: { label: "Mi-temps", cls: "live" },
+  FT: { label: "Terminé", cls: "ft" },
+  PST: { label: "Reporté", cls: "pst" },
+  CANC: { label: "Annulé", cls: "canc" }
+};
+const FINAL_STATUSES = { FT: 1, CANC: 1, PST: 1 };
+/* Un résultat « officiel » (qui attribue les points) = statut terminé, OU résultat hérité sans statut (saisie manuelle historique). */
+function isFinalResult(res) {
+  if (!res) return false;
+  if (res.status) return res.status === "FT";
+  return Number.isFinite(+res.a) && Number.isFinite(+res.b); /* rétro-compat : ancien résultat sans statut = final */
+}
+function kickoffMs(m) { return new Date(m[0] + "T" + m[1] + ":00").getTime(); }
+/* Statut d'affichage d'un match : priorité au statut fourni (API/manuel), sinon déduit de l'heure. */
+function matchStatusOf(m, res, nowMs) {
+  if (res && res.status && MATCH_STATUS[res.status]) return res.status;
+  if (isFinalResult(res)) return "FT";
+  const ko = kickoffMs(m);
+  if (nowMs < ko) return "NS";
+  if (nowMs < ko + 2.4 * 3600 * 1000) return "LIVE"; /* fenêtre de jeu estimée ~2h24 */
+  return "FT";
+}
+function pronoPoints(pred, res) {
+  if (!pred || !res) return 0;
+  const a = +pred.a, b = +pred.b, ra = +res.a, rb = +res.b;
+  if (![a, b, ra, rb].every(Number.isFinite)) return 0;
+  if (a === ra && b === rb) return 5;
+  const so = Math.sign(a - b), sr = Math.sign(ra - rb);
+  if (so === sr) return 3;
+  if (Math.abs(a - b) === Math.abs(ra - rb)) return 1;
+  return 0;
+}
+function isWonBet(b) {
+  const st = b.statut || "en_cours";
+  return st === "gagne" || (st === "cloture" && betProfit(b) > 0);
+}
+function isLostBet(b) {
+  const st = b.statut || "en_cours";
+  return st === "perdu" || (st === "cloture" && betProfit(b) < 0);
+}
+function buildPronoRanking(players, pronos, results) {
+  const rows = Object.values(players || {}).map((p) => {
+    let pts = 0, n = 0, settled = 0, exact = 0;
+    for (const [mk, byPid] of Object.entries(pronos || {})) {
+      const pred = byPid && byPid[p.id];
+      if (!pred) continue;
+      n++;
+      const res = (results || {})[mk];
+      if (isFinalResult(res)) { const pp = pronoPoints(pred, res); pts += pp; settled++; if (pp === 5) exact++; } /* points attribués uniquement sur résultat final officiel */
+    }
+    return { p, pts, n, settled, exact, avg: n > 0 ? pts / n : 0 };
+  }).filter((r) => r.n > 0);
+  rows.sort((a, b) => b.pts - a.pts || b.exact - a.exact || b.avg - a.avg);
+  return rows;
+}
+function computeProfile(player, bets) {
+  let bestBet = null, worstBet = null, bestCote = null;
+  let stakeSum = 0, stakeN = 0, winSum = 0, winN = 0, lossSum = 0, lossN = 0;
+  for (const b of bets) {
+    if ((b.statut || "en_cours") === "annule") continue;
+    const mise = +b.mise || 0;
+    stakeSum += mise; stakeN++;
+    const st = b.statut;
+    if (st === "gagne" || st === "perdu" || st === "cloture") {
+      const pr = betProfit(b);
+      if (pr > 0) { winSum += pr; winN++; if (!bestBet || pr > bestBet.v) bestBet = { v: pr, label: b.label }; }
+      else if (pr < 0) { lossSum += pr; lossN++; if (!worstBet || pr < worstBet.v) worstBet = { v: pr, label: b.label }; }
+    }
+    if (st === "gagne") {
+      const c = b.payout != null && mise > 0 ? +b.payout / mise : (+b.cote || 0);
+      if (c > 0 && (!bestCote || c > bestCote.v)) bestCote = { v: c, label: b.label };
+    }
+  }
+  return {
+    bestBet, worstBet, bestCote,
+    miseTotale: stakeSum,
+    miseMoyenne: stakeN > 0 ? stakeSum / stakeN : 0,
+    gainMoyen: winN > 0 ? winSum / winN : 0,
+    perteMoyenne: lossN > 0 ? lossSum / lossN : 0,
+    wonCount: bets.filter(isWonBet).length,
+    lostCount: bets.filter(isLostBet).length
+  };
+}
+function buildCompareSeries(players, betsByPlayer, pids, metric) {
+  const events = [];
+  for (const pid of pids) {
+    const p = players[pid];
+    if (!p) continue;
+    for (const b of (betsByPlayer[pid] || [])) {
+      const st = b.statut;
+      if (st !== "gagne" && st !== "perdu" && st !== "cloture") continue;
+      events.push({ pid, t: b.settledAt || b.createdAt || 0, dP: betProfit(b), dIn: 0 });
+    }
+    if (metric !== "profit") {
+      for (const d of (p.deposits || [])) events.push({ pid, t: +d.at || 0, dP: 0, dIn: +d.amount || 0 });
+    }
+  }
+  if (events.length < 1) return null;
+  events.sort((a, b) => a.t - b.t);
+  const cumP = {}, totalIn = {};
+  for (const pid of pids) { cumP[pid] = 0; totalIn[pid] = +((players[pid] || {}).start) || 0; }
+  const val = (pid) => {
+    if (metric === "profit") return Math.round(cumP[pid] * 100) / 100;
+    if (metric === "bankroll") return Math.round((totalIn[pid] + cumP[pid]) * 100) / 100;
+    return totalIn[pid] > 0 ? Math.round(cumP[pid] / totalIn[pid] * 1e3) / 10 : 0;
+  };
+  const mkRow = (label) => { const r = { label }; for (const pid of pids) r[pid] = val(pid); return r; };
+  const data = [mkRow("Départ")];
+  for (const e of events) { cumP[e.pid] += e.dP; totalIn[e.pid] += e.dIn; data.push(mkRow(new Date(e.t).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }))); }
+  return { data, pids };
+}
+
 function betProfit(b) {
   const mise = +b.mise || 0;
   const cote = +b.cote || 0;
@@ -558,7 +725,8 @@ const STATUT_META = {
   gagne: { label: "Gagn\xE9", cls: "won" },
   perdu: { label: "Perdu", cls: "lost" },
   cloture: { label: "Cl\xF4tur\xE9", cls: "cashout" },
-  rembourse: { label: "Rembours\xE9", cls: "refund" }
+  rembourse: { label: "Rembours\xE9", cls: "refund" },
+  annule: { label: "Annul\xE9", cls: "void" }
 };
 function parseLink(raw) {
   try {
@@ -616,6 +784,43 @@ function parseTicketCode(text) {
     return null;
   }
 }
+/* ===== Adaptateur (optionnel) de scores en direct via une API football =====
+   Tout est défensif : si non configuré ou en erreur, renvoie null sans jamais casser l'app. */
+const FootballAPI = (() => {
+  const cfg = (typeof window !== "undefined" && window.FOOTBALL_API) || {};
+  const base = cfg.proxyUrl || cfg.apiUrl || "";
+  const enabled = !!cfg.enabled && !!base;
+  function normStatus(s) {
+    const x = String(s || "").toUpperCase();
+    if (["NS", "TBD", "SCHEDULED", "NOT_STARTED"].indexOf(x) >= 0) return "NS";
+    if (["HT", "HALFTIME", "HALF_TIME"].indexOf(x) >= 0) return "HT";
+    if (["1H", "2H", "ET", "BT", "P", "LIVE", "INPLAY", "IN_PLAY", "PEN_LIVE"].indexOf(x) >= 0) return "LIVE";
+    if (["FT", "AET", "PEN", "FINISHED", "MATCH_FINISHED", "ENDED"].indexOf(x) >= 0) return "FT";
+    if (["PST", "POSTPONED", "SUSP", "SUSPENDED", "INT"].indexOf(x) >= 0) return "PST";
+    if (["CANC", "CANCELLED", "CANCELED", "ABD", "AWD", "WO"].indexOf(x) >= 0) return "CANC";
+    return x || "NS";
+  }
+  async function fetchOne(fixtureId) {
+    if (!enabled) return null;
+    const url = base + (base.indexOf("?") >= 0 ? "&" : "?") + "fixture=" + encodeURIComponent(fixtureId);
+    const headers = {};
+    if (cfg.apiKeyHeader && cfg.apiKey) headers[cfg.apiKeyHeader] = cfg.apiKey;
+    const r = await fetch(url, { headers });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    const d = typeof cfg.parse === "function" ? cfg.parse(j) : j;
+    if (!d) return null;
+    const a = Number(d.home != null ? d.home : (d.homeScore != null ? d.homeScore : d.a));
+    const b = Number(d.away != null ? d.away : (d.awayScore != null ? d.awayScore : d.b));
+    return {
+      a: Number.isFinite(a) ? a : null,
+      b: Number.isFinite(b) ? b : null,
+      status: normStatus(d.status),
+      half: d.half != null ? d.half : null
+    };
+  }
+  return { enabled: enabled, fetchOne: fetchOne, cfg: cfg };
+})();
 function App() {
   const [phase, setPhase] = useState("loading");
   const [me, setMe] = useState(null);
@@ -630,6 +835,8 @@ function App() {
   const [toast, setToast] = useState(null);
   const [recoveryBanner, setRecoveryBanner] = useState(null);
   const [statsFor, setStatsFor] = useState(null);
+  const [pronos, setPronos] = useState({});
+  const [results, setResults] = useState({});
   const toastTimer = useRef(null);
   const joiningRef = useRef(false);
   const [notifsOn, setNotifsOn] = useState(() => {
@@ -646,6 +853,14 @@ function App() {
   const prevCommentsRef = useRef(null);
   const betsByPlayerRef = useRef({});
   const securedRef = useRef(false);
+  const resultsRef = useRef({});
+  const [, setNowTick] = useState(0);
+  useEffect(() => { resultsRef.current = results; }, [results]);
+  /* Tick d'horloge : rafraîchit les statuts dépendant du temps (À venir → En cours) sans recharger la page. */
+  useEffect(() => {
+    const id = setInterval(() => setNowTick((t) => t + 1), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
   useEffect(() => {
     meRef.current = me;
   }, [me]);
@@ -811,11 +1026,61 @@ function App() {
         notifyComments(obj);
         setComments(obj);
       }));
+      offs.push(store.subscribe("pronos", (val) => {
+        setPronos(val && typeof val === "object" ? val : {});
+      }));
+      offs.push(store.subscribe("results", (val) => {
+        setResults(val && typeof val === "object" ? val : {});
+      }));
     })();
     return () => {
       cancelled = true;
       offs.forEach((f) => f());
     };
+  }, []);
+  /* ===== Récupération automatique des scores (req 3 & 4) =====
+     Live : toutes les 2 min · à venir : toutes les 30 min (et seulement à l'approche du coup d'envoi) · terminé : aucun appel.
+     Écrit dans Firebase (results:mk) uniquement si le score ou le statut a changé → points et classement recalculés automatiquement.
+     Inactif si window.FOOTBALL_API.enabled = false. */
+  useEffect(() => {
+    if (!FootballAPI.enabled || !store.available) return;
+    const fixtures = (FootballAPI.cfg && FootballAPI.cfg.fixtures) || {};
+    const groupMatches = CDM_MATCHES.map((m, idx) => ({ m, mk: matchKey(idx), ko: kickoffMs(m) })).filter(({ m, mk }) => m[5] && fixtures[mk] != null);
+    if (groupMatches.length === 0) return;
+    const lastFetch = {};
+    let stopped = false;
+    async function refreshMatch(mk, m) {
+      try {
+        const d = await FootballAPI.fetchOne(fixtures[mk]);
+        if (!d || stopped) return;
+        const prev = resultsRef.current[mk] || null;
+        /* ne jamais écraser un résultat final déjà acté par un statut non final */
+        if (prev && isFinalResult(prev) && d.status !== "FT") return;
+        const changed = !prev || (+prev.a !== d.a) || (+prev.b !== d.b) || (prev.status || "") !== d.status;
+        if (!changed) return;
+        await store.set("results:" + mk, { a: d.a, b: d.b, status: d.status, half: d.half, at: Date.now(), by: "auto", source: (FootballAPI.cfg && FootballAPI.cfg.provider) || "api" }, true);
+      } catch (e) {
+        console.warn("[FootballAPI] échec de mise à jour du match", mk, e && e.message ? e.message : e);
+      }
+    }
+    function tick() {
+      if (stopped) return;
+      const now = Date.now();
+      for (const { m, mk, ko } of groupMatches) {
+        const res = resultsRef.current[mk];
+        if (isFinalResult(res)) continue;                 /* terminé : aucun appel */
+        const status = matchStatusOf(m, res, now);
+        const live = status === "LIVE" || status === "HT";
+        if (status === "NS" && now < ko - 35 * 60 * 1000) continue; /* à venir lointain : on attend */
+        const interval = live ? 2 * 60 * 1000 : 30 * 60 * 1000;     /* live 2 min · à venir 30 min */
+        if ((lastFetch[mk] || 0) + interval > now) continue;
+        lastFetch[mk] = now;
+        refreshMatch(mk, m);
+      }
+    }
+    tick();
+    const id = setInterval(tick, 60 * 1000); /* évalue chaque minute ; la cadence réelle est limitée par match */
+    return () => { stopped = true; clearInterval(id); };
   }, []);
   useEffect(() => {
     if (phase !== "decide") return;
@@ -1100,6 +1365,11 @@ function App() {
   async function deleteBet(betId) {
     const mine = betsByPlayer[me] || [];
     const target = mine.find((b) => b.id === betId);
+    if (!target) return;
+    if (Date.now() - (target.createdAt || 0) > 5 * 60 * 1000) {
+      showToast("Suppression impossible apr\u00e8s 5 min \u2014 utilise \u00ab\u00a0Annuler\u00a0\u00bb pour corriger");
+      return;
+    }
     if (target && target.hasProof) await store.delete("proofs:" + betId, true);
     await store.delete("reactions:" + betId, true);
     await store.delete("comments:" + betId, true);
@@ -1110,6 +1380,28 @@ function App() {
     }
     setBetsByPlayer((prev) => ({ ...prev, [me]: (prev[me] || []).filter((b) => b.id !== betId) }));
     showToast("Ticket supprim\xE9");
+  }
+  async function saveProno(mkey, a, b) {
+    if (!me) return;
+    const ok = await store.set("pronos:" + mkey + ":" + me, { a: +a, b: +b, at: Date.now() }, true);
+    if (!ok) { showToast("\u00c9chec d'enregistrement du prono, r\u00e9essaie"); return; }
+    showToast("Prono enregistr\u00e9 \u{1F3AF}");
+  }
+  async function saveResult(mkey, a, b) {
+    if (!me) return;
+    const ok = await store.set("results:" + mkey, { a: +a, b: +b, at: Date.now(), by: me }, true);
+    if (!ok) { showToast("\u00c9chec d'enregistrement du r\u00e9sultat, r\u00e9essaie"); return; }
+    showToast("R\u00e9sultat enregistr\u00e9 \u2713");
+  }
+  async function cancelBet(betId) {
+    const mine = betsByPlayer[me] || [];
+    const target = mine.find((b) => b.id === betId);
+    if (!target) return;
+    const updated = { ...target, statut: "annule", settledAt: Date.now() };
+    const ok = await store.set("bets:" + me + ":" + betId, updated, true);
+    if (!ok) { showToast("\u00c9chec, r\u00e9essaie"); return; }
+    setBetsByPlayer((prev) => ({ ...prev, [me]: (prev[me] || []).map((b) => b.id === betId ? updated : b) }));
+    showToast("Ticket annul\u00e9 \u274C");
   }
   async function restoreBackup(obj) {
     if (!obj || typeof obj !== "object" || !obj.players || !obj.betsByPlayer) {
@@ -1140,6 +1432,12 @@ function App() {
     if (obj.badges && typeof obj.badges === "object") {
       for (const [id, b] of Object.entries(obj.badges)) await store.set("badges:" + id, b, true);
     }
+    if (obj.pronos && typeof obj.pronos === "object") {
+      for (const [id, p] of Object.entries(obj.pronos)) await store.set("pronos:" + id, p, true);
+    }
+    if (obj.results && typeof obj.results === "object") {
+      for (const [id, r] of Object.entries(obj.results)) await store.set("results:" + id, r, true);
+    }
     await loadAll();
     showToast("Sauvegarde restaur\xE9e \u2713");
   }
@@ -1160,6 +1458,7 @@ function App() {
         onClaim: claimAs
       }
     ));
+  const colorMap = playerColorMap(players);
   const allBets = Object.entries(betsByPlayer).flatMap(([pid, bets]) => bets.map((b) => ({ ...b, playerId: pid }))).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   const ranking = Object.values(players).map((p) => ({ player: p, stats: computeStats(p, betsByPlayer[p.id] || []), streaks: computeStreaks(betsByPlayer[p.id] || []) })).sort(
     (a, b) => b.stats.rendement - a.stats.rendement || b.stats.profit - a.stats.profit || b.stats.roi - a.stats.roi
@@ -1193,13 +1492,15 @@ function App() {
       me,
       onStatut: setBetStatut,
       onDelete: deleteBet,
+      onCancel: cancelBet,
+      colorMap,
       reactions,
       onReact: toggleReaction,
       comments,
       onComment: addComment,
       onDeleteComment: deleteComment
     }
-  ), tab === "nouveau" && /* @__PURE__ */ React.createElement(NewBet, { onSubmit: addBet, available: myStats ? myStats.bankroll : 0 }), tab === "matchs" && /* @__PURE__ */ React.createElement(CalendarView, null), tab === "stats" && /* @__PURE__ */ React.createElement(
+  ), tab === "nouveau" && /* @__PURE__ */ React.createElement(NewBet, { onSubmit: addBet, available: myStats ? myStats.bankroll : 0 }), tab === "mp" && /* @__PURE__ */ React.createElement(MatchsPronosView, { me, players, pronos, results, onProno: saveProno, onResult: saveResult }), tab === "stats" && /* @__PURE__ */ React.createElement(
     StatsView,
     {
       players,
@@ -1210,13 +1511,14 @@ function App() {
       onDeposit: addFunds,
       onRestore: restoreBackup,
       onDeletePlayer: deletePlayer,
-      badges
+      badges,
+      colorMap
     }
   )), /* @__PURE__ */ React.createElement("nav", { className: "tabbar" }, [
     ["classement", "\u{1F3C6}", "Classement"],
     ["paris", "\u{1F39F}\uFE0F", "Paris"],
     ["nouveau", "\uFF0B", "Parier"],
-    ["matchs", "\u{1F4C5}", "Matchs"],
+    ["mp", "\u{1F4C5}", "Matchs & Pronos"],
     ["stats", "\u{1F4CA}", "Stats"]
   ].map(([id, icon, label]) => /* @__PURE__ */ React.createElement(
     "button",
@@ -1295,84 +1597,110 @@ function ClaimBox({ players = [], onClaim }) {
   return /* @__PURE__ */ React.createElement("div", { className: "join-card" }, /* @__PURE__ */ React.createElement("p", { className: "muted small" }, "Nouveau t\xE9l\xE9phone ou cache vid\xE9 ? Retrouve ton compte avec le code de r\xE9cup\xE9ration affich\xE9 \xE0 ton inscription."), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Ton joueur"), /* @__PURE__ */ React.createElement("select", { value: pid, onChange: (e) => setPid(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 Choisis ton joueur \u2014"), players.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.emoji + " " + p.name)))), /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Code de r\xE9cup\xE9ration"), /* @__PURE__ */ React.createElement("input", { type: "text", value: code, maxLength: 12, placeholder: "Ex : K7M2QX", autoCapitalize: "characters", autoCorrect: "off", spellCheck: false, onChange: (e) => setCode(e.target.value.toUpperCase()) })), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !ready, onClick: go }, busy ? "V\xE9rification\u2026" : "R\xE9cup\xE9rer mon compte"), /* @__PURE__ */ React.createElement("button", { className: "claim-link", onClick: () => setOpen(false) }, "\u2190 Retour \xE0 l'inscription"));
 }
 function Leaderboard({ ranking, me, onSelect, players = {}, activity = [], comparison = null, comparisonPct = null, hall = [], badges = {} }) {
+  const [subTab, setSubTab] = useState("classement");
   const [sortBy, setSortBy] = useState("rendement");
-  const [actAll, setActAll] = useState(false);
   const colorMap = playerColorMap(players);
   if (ranking.length === 0)
-    return /* @__PURE__ */ React.createElement(Empty, { icon: "\u{1F3DF}\uFE0F", text: "Personne sur le terrain pour l'instant." });
+    return React.createElement(Empty, { icon: "🏟️", text: "Personne sur le terrain pour l'instant." });
   const kingId = ranking[0].player.id;
-  const sorted = sortBy === "profit" ? [...ranking].sort((a, b) => b.stats.profit - a.stats.profit) : sortBy === "wr" ? [...ranking].sort((a, b) => b.stats.winRate - a.stats.winRate || b.stats.profit - a.stats.profit) : ranking;
-  return /* @__PURE__ */ React.createElement("div", { className: "stack" }, activity.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "activity-card" }, (actAll ? activity : activity.slice(0, 4)).map((e, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "activity-line" }, e.txt)), activity.length > 4 && /* @__PURE__ */ React.createElement("button", { className: "activity-more", onClick: () => setActAll(!actAll) }, actAll ? "R\xE9duire" : `Voir toute l'activit\xE9 (${activity.length})`)), /* @__PURE__ */ React.createElement("h2", { className: "section-title" }, "Classement g\xE9n\xE9ral"), /* @__PURE__ */ React.createElement("div", { className: "filter-row" }, [["rendement", "Rentabilit\xE9"], ["profit", "\u20AC net"], ["wr", "% r\xE9ussite"]].map(([id, label]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "chip" + (sortBy === id ? " sel" : ""), onClick: () => setSortBy(id) }, label))), sorted.map(({ player, stats, streaks }, i) => /* @__PURE__ */ React.createElement("button", { key: player.id, className: "rank-card", onClick: () => onSelect(player.id) }, /* @__PURE__ */ React.createElement("div", { className: "rank-pos" + (i === 0 ? " gold" : "") }, i === 0 ? "\u{1F451}" : i + 1), /* @__PURE__ */ React.createElement("div", { className: "rank-avatar" }, player.emoji), /* @__PURE__ */ React.createElement("div", { className: "rank-main" }, /* @__PURE__ */ React.createElement("div", { className: "rank-name" }, player.name, player.id === me && /* @__PURE__ */ React.createElement("span", { className: "me-chip" }, "moi"), (() => { const ic = BADGES.filter((d) => d.id === "roi" ? player.id === kingId : (badges[player.id] || {})[d.id]).map((d) => d.icon).join(""); return ic ? /* @__PURE__ */ React.createElement("span", { className: "rank-badges" }, ic) : null; })()), /* @__PURE__ */ React.createElement("div", { className: "rank-meta" }, stats.wins, "V \xB7 ", stats.losses, "D \xB7 ", stats.pendingCount, " en cours", stats.winsBase + stats.lossesBase > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", Math.round(stats.winRate * 100), " % WR")), /* @__PURE__ */ React.createElement("div", { className: "rank-meta" }, "Investi ", EUR(stats.totalIn), stats.redeposits > 0 && /* @__PURE__ */ React.createElement("span", { className: "redep-chip" }, "+", EUR(stats.redeposits), " red\xE9pos\xE9s")), (streaks.curWin >= 2 || streaks.curLoss >= 2) && /* @__PURE__ */ React.createElement("div", { className: "rank-meta streak" + (streaks.curLoss >= 2 ? " cold" : "") }, streaks.curWin >= 2 ? `🔥 ${streaks.curWin} victoires d'affilée` : `❄️ ${streaks.curLoss} défaites d'affilée`, streaks.curWin >= 2 && streaks.curWin === streaks.bestWin || streaks.curLoss >= 2 && streaks.curLoss === streaks.worstLoss ? " · 🏅 record perso" : "")), /* @__PURE__ */ React.createElement("div", { className: "rank-right" }, /* @__PURE__ */ React.createElement("div", { className: "rank-profit " + (stats.rendement > 0 ? "pos" : stats.rendement < 0 ? "neg" : "") }, (stats.rendement > 0 ? "+" : "") + (stats.rendement * 100).toFixed(1), " %"), /* @__PURE__ */ React.createElement("div", { className: "rank-sub " + (stats.profit > 0 ? "pos" : stats.profit < 0 ? "neg" : "") }, signEUR(stats.profit), " net"), /* @__PURE__ */ React.createElement("div", { className: "rank-bankroll" }, "Bankroll ", EUR(stats.bankroll))))), /* @__PURE__ */ React.createElement("p", { className: "muted center small" }, (sortBy === "rendement" ? "Classement officiel : rentabilit\xE9 (b\xE9n\xE9fice net \xF7 total investi, red\xE9p\xF4ts inclus)." : "Tri d'affichage \u2014 le classement officiel reste \xE0 la rentabilit\xE9.") + " Touche un joueur pour ses stats."), hall.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("h2", { className: "section-title" }, "Hall of Fame"), /* @__PURE__ */ React.createElement("div", { className: "awards-grid" }, hall.map((a) => /* @__PURE__ */ React.createElement("div", { key: a.title, className: "award" }, /* @__PURE__ */ React.createElement("div", { className: "award-icon" }, a.icon), /* @__PURE__ */ React.createElement("div", { className: "award-body" }, /* @__PURE__ */ React.createElement("div", { className: "award-title" }, a.title), /* @__PURE__ */ React.createElement("div", { className: "award-who" }, a.who.emoji, " ", a.who.name, " \xB7 ", /* @__PURE__ */ React.createElement("b", null, a.value)), a.detail && /* @__PURE__ */ React.createElement("div", { className: "award-detail" }, "\xAB ", a.detail, " \xBB")))))), comparison && /* @__PURE__ */ React.createElement("div", { className: "chart-card" }, /* @__PURE__ */ React.createElement("div", { className: "chart-title" }, "La course \xB7 b\xE9n\xE9fice cumul\xE9 par joueur"), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 200 }, /* @__PURE__ */ React.createElement(LineChart, { data: comparison.data, margin: { top: 8, right: 8, bottom: 0, left: -16 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false }), /* @__PURE__ */ React.createElement(
-    Tooltip,
-    {
-      formatter: (v, key) => [EUR(v), players[key] ? players[key].name : key],
-      contentStyle: { background: "#0c2e1d", border: "1px solid #2c5a40", borderRadius: 10, color: "#f2f0e4", fontSize: 12 }
-    }
-  ), /* @__PURE__ */ React.createElement(ReferenceLine, { y: 0, stroke: "#2c5a40", strokeDasharray: "4 4" }), comparison.pids.map((pid, i) => /* @__PURE__ */ React.createElement(
-    Line,
-    {
-      key: pid,
-      type: "monotone",
-      dataKey: pid,
-      stroke: colorMap[pid] || PLAYER_COLORS[0],
-      strokeWidth: 2.5,
-      dot: false
-    }
-  )))), /* @__PURE__ */ React.createElement("div", { className: "legend-row" }, comparison.pids.map((pid, i) => /* @__PURE__ */ React.createElement("span", { key: pid, className: "legend-item" }, /* @__PURE__ */ React.createElement("i", { style: { background: colorMap[pid] || PLAYER_COLORS[0] } }), players[pid] ? players[pid].emoji + " " + players[pid].name : pid)))), comparisonPct && /* @__PURE__ */ React.createElement("div", { className: "chart-card" }, /* @__PURE__ */ React.createElement("div", { className: "chart-title" }, "La course \xB7 rendement (%) par joueur"), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 200 }, /* @__PURE__ */ React.createElement(LineChart, { data: comparisonPct.data, margin: { top: 8, right: 8, bottom: 0, left: -16 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false, domain: ["auto", "auto"] }), /* @__PURE__ */ React.createElement(
-    Tooltip,
-    {
-      formatter: (v, key) => [v.toLocaleString("fr-FR") + " %", players[key] ? players[key].name : key],
-      contentStyle: { background: "#0c2e1d", border: "1px solid #2c5a40", borderRadius: 10, color: "#f2f0e4", fontSize: 12 }
-    }
-  ), /* @__PURE__ */ React.createElement(ReferenceLine, { y: 0, stroke: "#2c5a40", strokeDasharray: "4 4" }), comparisonPct.pids.map((pid, i) => /* @__PURE__ */ React.createElement(
-    Line,
-    {
-      key: pid,
-      type: "monotone",
-      dataKey: pid,
-      stroke: colorMap[pid] || PLAYER_COLORS[0],
-      strokeWidth: 2.5,
-      dot: false
-    }
-  )))), /* @__PURE__ */ React.createElement("div", { className: "legend-row" }, comparisonPct.pids.map((pid, i) => /* @__PURE__ */ React.createElement("span", { key: pid, className: "legend-item" }, /* @__PURE__ */ React.createElement("i", { style: { background: colorMap[pid] || PLAYER_COLORS[0] } }), players[pid] ? players[pid].emoji + " " + players[pid].name : pid)))));
+  const sorted = sortBy === "profit" ? [...ranking].sort((a, b) => b.stats.profit - a.stats.profit)
+    : sortBy === "roi" ? [...ranking].sort((a, b) => b.stats.roi - a.stats.roi || b.stats.profit - a.stats.profit)
+    : sortBy === "wr" ? [...ranking].sort((a, b) => b.stats.winRate - a.stats.winRate || b.stats.profit - a.stats.profit)
+    : ranking;
+  const chartCard = (title, data, pids, fmt) => React.createElement("div", { className: "chart-card" },
+    React.createElement("div", { className: "chart-title" }, title),
+    React.createElement(ResponsiveContainer, { width: "100%", height: 200 },
+      React.createElement(LineChart, { data, margin: { top: 8, right: 8, bottom: 0, left: -16 } },
+        React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }),
+        React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false, domain: ["auto", "auto"] }),
+        React.createElement(Tooltip, { formatter: (v, key) => [fmt(v), players[key] ? players[key].name : key], contentStyle: { background: "#0c2e1d", border: "1px solid #2c5a40", borderRadius: 10, color: "#f2f0e4", fontSize: 12 } }),
+        React.createElement(ReferenceLine, { y: 0, stroke: "#2c5a40", strokeDasharray: "4 4" }),
+        pids.map((pid) => React.createElement(Line, { key: pid, type: "monotone", dataKey: pid, name: players[pid] ? players[pid].name : pid, stroke: colorMap[pid] || PLAYER_COLORS[0], strokeWidth: 2.5, dot: false })))),
+    React.createElement("div", { className: "legend-row" }, pids.map((pid) => React.createElement("span", { key: pid, className: "legend-item" }, React.createElement("i", { style: { background: colorMap[pid] || PLAYER_COLORS[0] } }), players[pid] ? players[pid].emoji + " " + players[pid].name : pid))));
+  const rankingList = React.createElement(React.Fragment, null,
+    React.createElement("h2", { className: "section-title" }, "Classement général"),
+    React.createElement("div", { className: "filter-row" }, [["rendement", "Rentabilité"], ["roi", "ROI"], ["profit", "€ net"], ["wr", "Winrate"]].map(([id, label]) => React.createElement("button", { key: id, className: "chip" + (sortBy === id ? " sel" : ""), onClick: () => setSortBy(id) }, label))),
+    sorted.map(({ player, stats, streaks }, i) => React.createElement("button", { key: player.id, className: "rank-card", onClick: () => onSelect(player.id) },
+      React.createElement("div", { className: "rank-pos" + (i === 0 ? " gold" : "") }, i === 0 ? "👑" : i + 1),
+      React.createElement("div", { className: "rank-avatar" }, player.emoji),
+      React.createElement("div", { className: "rank-main" },
+        React.createElement("div", { className: "rank-name" },
+          React.createElement("i", { className: "pcolor-dot", style: { background: colorMap[player.id] || PLAYER_COLORS[0] } }),
+          player.name,
+          player.id === me && React.createElement("span", { className: "me-chip" }, "moi"),
+          (() => { const ic = BADGES.filter((d) => d.id === "roi" ? player.id === kingId : (badges[player.id] || {})[d.id]).map((d) => d.icon).join(""); return ic ? React.createElement("span", { className: "rank-badges" }, ic) : null; })()),
+        React.createElement("div", { className: "rank-meta" }, stats.wins, "V · ", stats.losses, "D · ", stats.pendingCount, " en cours", stats.winsWR + stats.lossesWR > 0 && React.createElement(React.Fragment, null, " · ", Math.round(stats.winRate * 100), " % WR")),
+        React.createElement("div", { className: "rank-meta" }, "Investi ", EUR(stats.totalIn), stats.redeposits > 0 && React.createElement("span", { className: "redep-chip" }, "+", EUR(stats.redeposits), " redéposés")),
+        (streaks.curWin >= 2 || streaks.curLoss >= 2) && React.createElement("div", { className: "rank-meta streak" + (streaks.curLoss >= 2 ? " cold" : "") }, streaks.curWin >= 2 ? "🔥 " + streaks.curWin + " victoires d'affilée" : "❄️ " + streaks.curLoss + " défaites d'affilée", (streaks.curWin >= 2 && streaks.curWin === streaks.bestWin) || (streaks.curLoss >= 2 && streaks.curLoss === streaks.worstLoss) ? " · 🏅 record perso" : "")),
+      React.createElement("div", { className: "rank-right" },
+        React.createElement("div", { className: "rank-profit " + (stats.rendement > 0 ? "pos" : stats.rendement < 0 ? "neg" : "") }, (stats.rendement > 0 ? "+" : "") + (stats.rendement * 100).toFixed(1), " %"),
+        React.createElement("div", { className: "rank-sub " + (stats.profit > 0 ? "pos" : stats.profit < 0 ? "neg" : "") }, signEUR(stats.profit), " net"),
+        React.createElement("div", { className: "rank-bankroll" }, "Bankroll ", EUR(stats.bankroll))))),
+    React.createElement("p", { className: "muted center small" }, (sortBy === "rendement" ? "Classement officiel : rentabilité (bénéfice net ÷ total investi, redépôts inclus)." : "Tri d'affichage — le classement officiel reste à la rentabilité.") + " Touche un joueur pour son profil."),
+    comparison && chartCard("La course · bénéfice cumulé par joueur", comparison.data, comparison.pids, EUR),
+    comparisonPct && chartCard("La course · rendement (%) par joueur", comparisonPct.data, comparisonPct.pids, (v) => v.toLocaleString("fr-FR") + " %"));
+  const hofView = React.createElement(React.Fragment, null,
+    React.createElement("h2", { className: "section-title" }, "Hall of Fame"),
+    hall.length > 0
+      ? React.createElement("div", { className: "awards-grid" }, hall.map((a) => React.createElement("div", { key: a.title, className: "award" },
+          React.createElement("div", { className: "award-icon" }, a.icon),
+          React.createElement("div", { className: "award-body" },
+            React.createElement("div", { className: "award-title" }, a.title),
+            React.createElement("div", { className: "award-who" }, a.who.emoji, " ", a.who.name, " · ", React.createElement("b", null, a.value)),
+            a.detail && React.createElement("div", { className: "award-detail" }, "« ", a.detail, " »")))))
+      : React.createElement(Empty, { icon: "🏆", text: "Pas encore de récompense — il faut des paris réglés." }),
+    React.createElement("h3", { className: "sub-title" }, "Succès des joueurs"),
+    React.createElement("div", { className: "stack" }, ranking.map(({ player }) => {
+      const icons = BADGES.filter((d) => d.id === "roi" ? player.id === kingId : (badges[player.id] || {})[d.id]);
+      return React.createElement("div", { key: player.id, className: "succ-row" },
+        React.createElement("i", { className: "pcolor-dot", style: { background: colorMap[player.id] || PLAYER_COLORS[0] } }),
+        React.createElement("span", { className: "succ-name" }, player.emoji + " " + player.name),
+        React.createElement("span", { className: "succ-icons" }, icons.length ? icons.map((d) => d.icon).join(" ") : "—"),
+        React.createElement("span", { className: "succ-count" }, icons.length + "/" + BADGES.length));
+    })));
+  const actView = React.createElement(React.Fragment, null,
+    React.createElement("h2", { className: "section-title" }, "Activité"),
+    activity.length > 0
+      ? React.createElement("div", { className: "activity-card" }, activity.map((e, i) => React.createElement("div", { key: i, className: "activity-line" }, e.txt)))
+      : React.createElement(Empty, { icon: "📡", text: "Aucune activité pour l'instant." }));
+  return React.createElement("div", { className: "stack" },
+    React.createElement("div", { className: "subnav" }, [["classement", "🏆 Classement"], ["hof", "⭐ Hall of Fame"], ["activite", "📡 Activité"]].map(([id, label]) => React.createElement("button", { key: id, className: "subnav-btn" + (subTab === id ? " sel" : ""), onClick: () => setSubTab(id) }, label))),
+    subTab === "classement" && rankingList,
+    subTab === "hof" && hofView,
+    subTab === "activite" && actView);
 }
-function BetsFeed({ bets, players, me, onStatut, onDelete, reactions = {}, onReact, comments = {}, onComment, onDeleteComment }) {
-  const [filter, setFilter] = useState("tous");
+
+function BetsFeed({ bets, players, me, onStatut, onDelete, onCancel, reactions = {}, onReact, comments = {}, onComment, onDeleteComment, colorMap = {} }) {
+  const [fPlayer, setFPlayer] = useState("tous");
+  const [fStatus, setFStatus] = useState("tous");
+  const order = Object.values(players).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   const filtered = bets.filter((b) => {
+    if (fPlayer !== "tous" && b.playerId !== fPlayer) return false;
     const st = b.statut || "en_cours";
-    if (filter === "moi") return b.playerId === me;
-    if (filter === "en_cours") return st === "en_cours";
-    if (filter === "passes") return st !== "en_cours";
-    if (filter === "gagne") return st === "gagne";
-    if (filter === "perdu") return st === "perdu";
+    if (fStatus === "en_cours") return st === "en_cours";
+    if (fStatus === "gagne") return isWonBet(b);
+    if (fStatus === "perdu") return isLostBet(b);
+    if (fStatus === "annule") return st === "annule";
     return true;
   });
-  return /* @__PURE__ */ React.createElement("div", { className: "stack" }, /* @__PURE__ */ React.createElement("div", { className: "filter-row" }, [
-    ["tous", "Tous"],
-    ["en_cours", "En cours"],
-    ["passes", "Termin\xE9s"],
-    ["gagne", "Gagn\xE9s"],
-    ["perdu", "Perdus"],
-    ["moi", "Mes paris"]
-  ].map(([id, label]) => /* @__PURE__ */ React.createElement("button", { key: id, className: "chip" + (filter === id ? " sel" : ""), onClick: () => setFilter(id) }, label))), filtered.length === 0 ? /* @__PURE__ */ React.createElement(Empty, { icon: "\u{1F39F}\uFE0F", text: "Aucun ticket ici. Le guichet est ouvert !" }) : filtered.map((b) => /* @__PURE__ */ React.createElement(
-    BetTicket,
-    {
-      key: b.playerId + b.id,
-      bet: b,
-      player: players[b.playerId],
-      mine: b.playerId === me,
-      onStatut,
-      onDelete,
-      betReactions: reactions[b.id] || {},
-      myId: me,
-      onReact,
-      playersAll: players,
-      betComments: comments[b.id] || {},
-      onComment,
-      onDeleteComment
-    }
-  )));
+  return React.createElement("div", { className: "stack" },
+    React.createElement("div", { className: "filter-row scroll" },
+      React.createElement("button", { className: "chip" + (fPlayer === "tous" ? " sel" : ""), onClick: () => setFPlayer("tous") }, "Tous les joueurs"),
+      order.map((p) => React.createElement("button", { key: p.id, className: "chip" + (fPlayer === p.id ? " sel" : ""), onClick: () => setFPlayer(p.id) },
+        React.createElement("i", { className: "pcolor-dot", style: { background: colorMap[p.id] || PLAYER_COLORS[0] } }), p.id === me ? "Moi" : p.name))),
+    React.createElement("div", { className: "filter-row" }, [
+      ["tous", "Tous"], ["en_cours", "En cours"], ["gagne", "Gagnés"], ["perdu", "Perdus"], ["annule", "Annulés"]
+    ].map(([id, label]) => React.createElement("button", { key: id, className: "chip" + (fStatus === id ? " sel" : ""), onClick: () => setFStatus(id) }, label))),
+    filtered.length === 0
+      ? React.createElement(Empty, { icon: "🎟️", text: "Aucun ticket pour ce filtre." })
+      : filtered.map((b) => React.createElement(BetTicket, {
+          key: b.playerId + b.id, bet: b, player: players[b.playerId], mine: b.playerId === me,
+          onStatut, onDelete, onCancel, betReactions: reactions[b.id] || {}, myId: me, onReact,
+          playersAll: players, betComments: comments[b.id] || {}, onComment, onDeleteComment,
+          color: colorMap[b.playerId] || PLAYER_COLORS[0]
+        })));
 }
+
 function CommentThread({ betId, comments = {}, players = {}, myId, onComment, onDeleteComment }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -1391,25 +1719,19 @@ function CommentThread({ betId, comments = {}, players = {}, myId, onComment, on
     if (e.key === "Enter") send();
   } }), /* @__PURE__ */ React.createElement("button", { className: "comment-send", onClick: send, disabled: !text.trim(), "aria-label": "Envoyer" }, "\u27A4"))));
 }
-function BetTicket({ bet, player, mine, onStatut, onDelete, betReactions = {}, myId, onReact, playersAll = {}, betComments = {}, onComment, onDeleteComment }) {
+function BetTicket({ bet, player, mine, onStatut, onDelete, onCancel, betReactions = {}, myId, onReact, playersAll = {}, betComments = {}, onComment, onDeleteComment, color }) {
   const [confirmDel, setConfirmDel] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [panelFor, setPanelFor] = useState(null);
   const [payoutInput, setPayoutInput] = useState("");
   const [proof, setProof] = useState(null);
   const [proofLoading, setProofLoading] = useState(false);
   const [zoom, setZoom] = useState(false);
   async function toggleProof() {
-    if (proof) {
-      setProof(null);
-      return;
-    }
+    if (proof) { setProof(null); return; }
     setProofLoading(true);
-    try {
-      const data = await store.get("proofs:" + bet.id, true);
-      setProof(typeof data === "string" ? data : null);
-    } finally {
-      setProofLoading(false);
-    }
+    try { const data = await store.get("proofs:" + bet.id, true); setProof(typeof data === "string" ? data : null); }
+    finally { setProofLoading(false); }
   }
   const statut = bet.statut || "en_cours";
   const meta = STATUT_META[statut] || STATUT_META.en_cours;
@@ -1417,52 +1739,90 @@ function BetTicket({ bet, player, mine, onStatut, onDelete, betReactions = {}, m
   const cote = +bet.cote || 0;
   const gainPotentiel = mise * cote;
   const resultat = betProfit(bet);
+  /* Couleur du ticket selon le RÉSULTAT (et non le joueur) :
+     gagné ou clôturé positif = vert · perdu ou clôturé négatif = rouge · en cours / remboursé / clôturé nul = neutre. */
+  const resultClass = (statut === "gagne" || (statut === "cloture" && resultat > 0)) ? "res-won"
+    : (statut === "perdu" || (statut === "cloture" && resultat < 0)) ? "res-lost"
+    : "res-neutral";
   const coteEffective = (statut === "gagne" || statut === "cloture") && bet.payout != null && mise > 0 ? +bet.payout / mise : null;
-  function openPanel(st) {
-    setPayoutInput(st === "gagne" ? gainPotentiel.toFixed(2).replace(".", ",") : "");
-    setPanelFor(st);
-  }
-  function confirmPanel() {
-    const v = parseFloat(String(payoutInput).replace(",", "."));
-    if (!Number.isFinite(v) || v < 0) return;
-    onStatut(bet.id, panelFor, v);
-    setPanelFor(null);
-  }
+  const canDelete = mine && (Date.now() - (bet.createdAt || 0) < 5 * 60 * 1000);
+  function openPanel(st) { setPayoutInput(st === "gagne" ? gainPotentiel.toFixed(2).replace(".", ",") : ""); setPanelFor(st); }
+  function confirmPanel() { const v = parseFloat(String(payoutInput).replace(",", ".")); if (!Number.isFinite(v) || v < 0) return; onStatut(bet.id, panelFor, v); setPanelFor(null); }
   const payN = parseFloat(String(payoutInput).replace(",", "."));
   const payPct = Number.isFinite(payN) && gainPotentiel > 0 ? payN / gainPotentiel * 100 : null;
   const reactionCounts = {};
   for (const emo of Object.values(betReactions)) reactionCounts[emo] = (reactionCounts[emo] || 0) + 1;
   const myReaction = betReactions[myId];
-  return /* @__PURE__ */ React.createElement("div", { className: "ticket " + meta.cls }, /* @__PURE__ */ React.createElement("div", { className: "ticket-head" }, /* @__PURE__ */ React.createElement("span", { className: "ticket-player" }, player ? player.emoji + " " + player.name : "?"), /* @__PURE__ */ React.createElement("span", { className: "ticket-badges" }, bet.categorie === "fun" && /* @__PURE__ */ React.createElement("span", { className: "badge fun" }, "\u{1F3B2} fun"), /* @__PURE__ */ React.createElement("span", { className: "badge " + meta.cls }, meta.label))), /* @__PURE__ */ React.createElement("div", { className: "ticket-match" }, bet.label), Array.isArray(bet.selections) && bet.selections.length > 1 ? /* @__PURE__ */ React.createElement("ul", { className: "ticket-sel" }, bet.selections.map((sel, i) => /* @__PURE__ */ React.createElement("li", { key: i }, /* @__PURE__ */ React.createElement("span", null, sel.match || "\u2014"), /* @__PURE__ */ React.createElement("em", null, sel.pick, sel.cote ? " \xB7 " + (+sel.cote).toFixed(2) : "")))) : bet.pick && /* @__PURE__ */ React.createElement("div", { className: "ticket-pick" }, "\u2192 ", bet.pick), bet.url && /* @__PURE__ */ React.createElement("a", { className: "stake-link", href: bet.url, target: "_blank", rel: "noopener noreferrer" }, "V\xE9rifier sur ", bet.book || bookFromUrl(bet.url), " \u2197"), bet.hasProof && /* @__PURE__ */ React.createElement("button", { className: "proof-btn", onClick: toggleProof, disabled: proofLoading }, proofLoading ? "Chargement\u2026" : proof ? "Masquer la capture" : "\u{1F4CE} Voir la capture du pari"), proof && /* @__PURE__ */ React.createElement("img", { className: "proof-img", src: proof, alt: "Capture du pari", onClick: () => setZoom(true) }), zoom && proof && /* @__PURE__ */ React.createElement("div", { className: "lightbox", onClick: () => setZoom(false) }, /* @__PURE__ */ React.createElement("img", { src: proof, alt: "Capture du pari" })), /* @__PURE__ */ React.createElement("div", { className: "ticket-meta" }, bet.match && /* @__PURE__ */ React.createElement("span", { className: "lock-match" }, "\u{1F4C5} ", bet.match.label, " \xB7 ", fmtTs(bet.match.kick), " \u2014 "), bet.createdAt && "\u{1F550} Mis\xE9 le " + fmtTs(bet.createdAt), bet.settledAt ? " \xB7 r\xE9gl\xE9 le " + fmtTs(bet.settledAt) : "", bet.match && bet.createdAt && /* @__PURE__ */ React.createElement("span", { className: "lock " + (bet.createdAt <= bet.match.kick ? "ok" : "warn") }, bet.createdAt <= bet.match.kick ? " \u{1F512} avant le coup d'envoi" : " \u26A0\uFE0F apr\xE8s le coup d'envoi")), /* @__PURE__ */ React.createElement("div", { className: "ticket-perf", "aria-hidden": "true" }), /* @__PURE__ */ React.createElement("div", { className: "ticket-nums" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("small", null, "Mise"), /* @__PURE__ */ React.createElement("strong", null, EUR(mise))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("small", null, "Cote"), /* @__PURE__ */ React.createElement("strong", null, cote.toLocaleString("fr-FR", { minimumFractionDigits: 2 }))), /* @__PURE__ */ React.createElement("div", { className: "right" }, statut === "en_cours" || statut === "rembourse" ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("small", null, "Gain potentiel"), /* @__PURE__ */ React.createElement("strong", null, EUR(gainPotentiel))) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("small", null, "R\xE9sultat"), /* @__PURE__ */ React.createElement("strong", { className: resultat > 0 ? "pos" : resultat < 0 ? "neg" : "" }, signEUR(resultat))))), coteEffective != null && (statut === "cloture" || Math.abs(+bet.payout - gainPotentiel) > 0.01) && /* @__PURE__ */ React.createElement("div", { className: "ticket-cashout" }, statut === "cloture" ? "Cl\xF4tur\xE9 avant terme \xB7 " : "", "Encaiss\xE9 ", EUR(+bet.payout), " (", Math.round(+bet.payout / gainPotentiel * 100), " % du gain th\xE9orique) \xB7 cote effective ", coteEffective.toFixed(2)), /* @__PURE__ */ React.createElement("div", { className: "reaction-row" }, ["\u{1F525}", "\u{1F602}", "\u{1F480}", "\u{1F44F}"].map((emo) => /* @__PURE__ */ React.createElement(
-    "button",
-    {
-      key: emo,
-      className: "reaction" + (myReaction === emo ? " mine" : ""),
-      "aria-label": "R\xE9agir " + emo,
-      onClick: () => onReact && onReact(bet.id, emo)
-    },
-    emo,
-    reactionCounts[emo] ? /* @__PURE__ */ React.createElement("span", { className: "reaction-count" }, reactionCounts[emo]) : null
-  ))), /* @__PURE__ */ React.createElement(CommentThread, { betId: bet.id, comments: betComments, players: playersAll, myId, onComment, onDeleteComment }), mine && /* @__PURE__ */ React.createElement("div", { className: "ticket-actions" }, statut === "en_cours" ? panelFor ? /* @__PURE__ */ React.createElement("div", { className: "win-panel" }, /* @__PURE__ */ React.createElement("label", { className: "win-row" }, /* @__PURE__ */ React.createElement("span", null, "Montant encaiss\xE9 (\u20AC)"), /* @__PURE__ */ React.createElement(
-    "input",
-    {
-      type: "text",
-      inputMode: "decimal",
-      value: payoutInput,
-      autoFocus: true,
-      onChange: (e) => setPayoutInput(e.target.value)
+  const deleteBtn = canDelete && (confirmDel
+    ? React.createElement("button", { className: "act del confirm", onClick: () => onDelete(bet.id) }, "Supprimer ?")
+    : React.createElement("button", { className: "act del", onClick: () => setConfirmDel(true) }, "🗑"));
+  const cancelBtn = statut !== "annule" && (confirmCancel
+    ? React.createElement("button", { className: "act del confirm", onClick: () => { onCancel(bet.id); setConfirmCancel(false); } }, "Annuler le ticket ?")
+    : React.createElement("button", { className: "act void", onClick: () => setConfirmCancel(true) }, "❌ Annuler"));
+  let actions = null;
+  if (mine) {
+    if (statut === "annule") {
+      actions = React.createElement("div", { className: "ticket-actions" },
+        React.createElement("button", { className: "act undo", onClick: () => onStatut(bet.id, "en_cours") }, "↺ Remettre en cours"), deleteBtn);
+    } else if (statut === "en_cours") {
+      actions = React.createElement("div", { className: "ticket-actions" },
+        panelFor
+          ? React.createElement("div", { className: "win-panel" },
+              React.createElement("label", { className: "win-row" },
+                React.createElement("span", null, "Montant encaissé (€)"),
+                React.createElement("input", { type: "text", inputMode: "decimal", value: payoutInput, autoFocus: true, onChange: (e) => setPayoutInput(e.target.value) })),
+              React.createElement("div", { className: "win-chips" }, [100, 75, 50, 25].map((p) => React.createElement("button", { key: p, className: "chip mini", onClick: () => setPayoutInput((gainPotentiel * p / 100).toFixed(2).replace(".", ",")) }, p, " %"))),
+              payPct != null && React.createElement("small", { className: "win-live" }, "= ", Math.round(payPct), " % du gain théorique · cote effective ", mise > 0 ? (payN / mise).toFixed(2) : "—"),
+              React.createElement("small", { className: "win-hint" }, panelFor === "cloture" ? "Tu encaisses avant la fin du pari (cash-out). Indique le montant récupéré — il peut être inférieur à ta mise." : "Gain théorique : " + EUR(gainPotentiel) + ". Payé partiellement (cote réduite, 2 buts au lieu de 3…) ? Ajuste le montant ou tape un %."),
+              React.createElement("div", { className: "win-actions" },
+                React.createElement("button", { className: "act undo", onClick: () => setPanelFor(null) }, "Annuler"),
+                React.createElement("button", { className: panelFor === "cloture" ? "act cashout" : "act won", onClick: confirmPanel }, panelFor === "cloture" ? "Confirmer la clôture" : "Confirmer le gain")))
+          : React.createElement(React.Fragment, null,
+              React.createElement("button", { className: "act won", onClick: () => openPanel("gagne") }, "✓ Gagné"),
+              React.createElement("button", { className: "act lost", onClick: () => onStatut(bet.id, "perdu") }, "✗ Perdu"),
+              React.createElement("button", { className: "act cashout", onClick: () => openPanel("cloture") }, "💰 Clôturer"),
+              React.createElement("button", { className: "act refund", onClick: () => onStatut(bet.id, "rembourse") }, "↩ Remb."),
+              cancelBtn, deleteBtn));
+    } else {
+      actions = React.createElement("div", { className: "ticket-actions" },
+        React.createElement("button", { className: "act undo", onClick: () => onStatut(bet.id, "en_cours") }, "↺ Remettre en cours"), cancelBtn, deleteBtn);
     }
-  )), /* @__PURE__ */ React.createElement("div", { className: "win-chips" }, [100, 75, 50, 25].map((p) => /* @__PURE__ */ React.createElement(
-    "button",
-    {
-      key: p,
-      className: "chip mini",
-      onClick: () => setPayoutInput((gainPotentiel * p / 100).toFixed(2).replace(".", ","))
-    },
-    p,
-    " %"
-  ))), payPct != null && /* @__PURE__ */ React.createElement("small", { className: "win-live" }, "= ", Math.round(payPct), " % du gain th\xE9orique \xB7 cote effective ", mise > 0 ? (payN / mise).toFixed(2) : "\u2014"), /* @__PURE__ */ React.createElement("small", { className: "win-hint" }, panelFor === "cloture" ? "Tu encaisses avant la fin du pari (cash-out). Indique le montant r\xE9cup\xE9r\xE9 \u2014 il peut \xEAtre inf\xE9rieur \xE0 ta mise." : "Gain th\xE9orique : " + EUR(gainPotentiel) + ". Pay\xE9 partiellement (cote r\xE9duite, 2 buts au lieu de 3\u2026) ? Ajuste le montant ou tape un %."), /* @__PURE__ */ React.createElement("div", { className: "win-actions" }, /* @__PURE__ */ React.createElement("button", { className: "act undo", onClick: () => setPanelFor(null) }, "Annuler"), /* @__PURE__ */ React.createElement("button", { className: panelFor === "cloture" ? "act cashout" : "act won", onClick: confirmPanel }, panelFor === "cloture" ? "Confirmer la cl\xF4ture" : "Confirmer le gain"))) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "act won", onClick: () => openPanel("gagne") }, "\u2713 Gagn\xE9"), /* @__PURE__ */ React.createElement("button", { className: "act lost", onClick: () => onStatut(bet.id, "perdu") }, "\u2717 Perdu"), /* @__PURE__ */ React.createElement("button", { className: "act cashout", onClick: () => openPanel("cloture") }, "\u{1F4B0} Cl\xF4turer"), /* @__PURE__ */ React.createElement("button", { className: "act refund", onClick: () => onStatut(bet.id, "rembourse") }, "\u21A9 Remb."), confirmDel ? /* @__PURE__ */ React.createElement("button", { className: "act del confirm", onClick: () => onDelete(bet.id) }, "Confirmer ?") : /* @__PURE__ */ React.createElement("button", { className: "act del", onClick: () => setConfirmDel(true) }, "\u{1F5D1}")) : /* @__PURE__ */ React.createElement("button", { className: "act undo", onClick: () => onStatut(bet.id, "en_cours") }, "\u21BA Remettre en cours")));
+  }
+  return React.createElement("div", { className: "ticket " + resultClass },
+    React.createElement("div", { className: "ticket-head" },
+      React.createElement("span", { className: "ticket-player" }, player ? player.emoji + " " + player.name : "?"),
+      React.createElement("span", { className: "ticket-badges" },
+        bet.categorie === "fun" && React.createElement("span", { className: "badge fun" }, "🎲 fun"),
+        React.createElement("span", { className: "badge " + meta.cls }, meta.label))),
+    React.createElement("div", { className: "ticket-match" }, bet.label),
+    Array.isArray(bet.selections) && bet.selections.length > 1
+      ? React.createElement("ul", { className: "ticket-sel" }, bet.selections.map((sel, i) => React.createElement("li", { key: i }, React.createElement("span", null, sel.match || "—"), React.createElement("em", null, sel.pick, sel.cote ? " · " + (+sel.cote).toFixed(2) : ""))))
+      : bet.pick && React.createElement("div", { className: "ticket-pick" }, "→ ", bet.pick),
+    bet.url && React.createElement("a", { className: "stake-link", href: bet.url, target: "_blank", rel: "noopener noreferrer" }, "Vérifier sur ", bet.book || bookFromUrl(bet.url), " ↗"),
+    bet.hasProof && React.createElement("button", { className: "proof-btn", onClick: toggleProof, disabled: proofLoading }, proofLoading ? "Chargement…" : proof ? "Masquer la capture" : "📎 Voir la capture du pari"),
+    proof && React.createElement("img", { className: "proof-img", src: proof, alt: "Capture du pari", onClick: () => setZoom(true) }),
+    zoom && proof && React.createElement("div", { className: "lightbox", onClick: () => setZoom(false) }, React.createElement("img", { src: proof, alt: "Capture du pari" })),
+    React.createElement("div", { className: "ticket-meta" },
+      bet.match && React.createElement("span", { className: "lock-match" }, "📅 ", bet.match.label, " · ", fmtTs(bet.match.kick), " — "),
+      bet.createdAt && "🕐 Misé le " + fmtTs(bet.createdAt),
+      bet.settledAt && statut !== "en_cours" ? " · réglé le " + fmtTs(bet.settledAt) : "",
+      bet.match && bet.createdAt && React.createElement("span", { className: "lock " + (bet.createdAt <= bet.match.kick ? "ok" : "warn") }, bet.createdAt <= bet.match.kick ? " 🔒 avant le coup d'envoi" : " ⚠️ après le coup d'envoi")),
+    React.createElement("div", { className: "ticket-perf", "aria-hidden": "true" }),
+    React.createElement("div", { className: "ticket-nums" },
+      React.createElement("div", null, React.createElement("small", null, "Mise"), React.createElement("strong", null, EUR(mise))),
+      React.createElement("div", null, React.createElement("small", null, "Cote"), React.createElement("strong", null, cote.toLocaleString("fr-FR", { minimumFractionDigits: 2 }))),
+      React.createElement("div", { className: "right" },
+        statut === "en_cours" || statut === "rembourse"
+          ? React.createElement(React.Fragment, null, React.createElement("small", null, "Gain potentiel"), React.createElement("strong", null, EUR(gainPotentiel)))
+          : statut === "annule"
+            ? React.createElement(React.Fragment, null, React.createElement("small", null, "Statut"), React.createElement("strong", null, "—"))
+            : React.createElement(React.Fragment, null, React.createElement("small", null, "Résultat"), React.createElement("strong", { className: resultat > 0 ? "pos" : resultat < 0 ? "neg" : "" }, signEUR(resultat))))),
+    coteEffective != null && (statut === "cloture" || Math.abs(+bet.payout - gainPotentiel) > 0.01) && React.createElement("div", { className: "ticket-cashout" }, statut === "cloture" ? "Clôturé avant terme · " : "", "Encaissé ", EUR(+bet.payout), " (", Math.round(+bet.payout / gainPotentiel * 100), " % du gain théorique) · cote effective ", coteEffective.toFixed(2)),
+    React.createElement("div", { className: "reaction-row" }, ["🔥", "😂", "💀", "👏"].map((emo) => React.createElement("button", { key: emo, className: "reaction" + (myReaction === emo ? " mine" : ""), "aria-label": "Réagir " + emo, onClick: () => onReact && onReact(bet.id, emo) }, emo, reactionCounts[emo] ? React.createElement("span", { className: "reaction-count" }, reactionCounts[emo]) : null))),
+    React.createElement(CommentThread, { betId: bet.id, comments: betComments, players: playersAll, myId, onComment, onDeleteComment }),
+    actions);
 }
+
 function NewBet({ onSubmit, available = 0 }) {
   const [libre, setLibre] = useState("");
   const [pick, setPick] = useState("");
@@ -1606,8 +1966,9 @@ function CoteMise({ cote, setCote, mise, setMise, available = 0, overBankroll = 
 function RecapGain({ label, pick, valid, gain }) {
   return /* @__PURE__ */ React.createElement("div", { className: "gain-preview" + (valid ? " on" : "") }, /* @__PURE__ */ React.createElement("div", { className: "gain-left" }, /* @__PURE__ */ React.createElement("span", null, "Gain potentiel"), valid && (label || pick) && /* @__PURE__ */ React.createElement("small", { className: "gain-recap" }, [label, pick].filter(Boolean).join(" \xB7 "))), /* @__PURE__ */ React.createElement("strong", null, valid ? EUR(gain) : "\u2014"));
 }
-function StatsView({ players, betsByPlayer, statsFor, setStatsFor, me, onDeposit, onRestore, onDeletePlayer, badges = {} }) {
-  const list = Object.values(players);
+function StatsView({ players, betsByPlayer, statsFor, setStatsFor, me, onDeposit, onRestore, onDeletePlayer, badges = {}, colorMap = {} }) {
+  const [mode, setMode] = useState("profil");
+  const list = Object.values(players).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   const player = players[statsFor] || players[me];
   const [showDeposit, setShowDeposit] = useState(false);
   const [depAmount, setDepAmount] = useState("");
@@ -1619,10 +1980,9 @@ function StatsView({ players, betsByPlayer, statsFor, setStatsFor, me, onDeposit
     const reactions = await store.get("reactions", true) || {};
     const commentsAll = await store.get("comments", true) || {};
     const badgesAll = await store.get("badges", true) || {};
-    const blob = new Blob(
-      [JSON.stringify({ app: "PRONO", exportedAt: Date.now(), players, betsByPlayer, proofs, reactions, comments: commentsAll, badges: badgesAll }, null, 2)],
-      { type: "application/json" }
-    );
+    const pronosAll = await store.get("pronos", true) || {};
+    const resultsAll = await store.get("results", true) || {};
+    const blob = new Blob([JSON.stringify({ app: "PRONO", exportedAt: Date.now(), players, betsByPlayer, proofs, reactions, comments: commentsAll, badges: badgesAll, pronos: pronosAll, results: resultsAll }, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "prono-cdm2026-sauvegarde.json";
@@ -1633,84 +1993,198 @@ function StatsView({ players, betsByPlayer, statsFor, setStatsFor, me, onDeposit
     const file = e.target.files && e.target.files[0];
     e.target.value = "";
     if (!file) return;
-    try {
-      const data = JSON.parse(await file.text());
-      setPendingRestore({ name: file.name, data });
-    } catch (e2) {
-      setPendingRestore(null);
-    }
+    try { const data = JSON.parse(await file.text()); setPendingRestore({ name: file.name, data }); }
+    catch (e2) { setPendingRestore(null); }
   }
-  if (!player) return /* @__PURE__ */ React.createElement(Empty, { icon: "\u{1F4CA}", text: "Aucune donn\xE9e pour l'instant." });
+  if (!player) return React.createElement(Empty, { icon: "📊", text: "Aucune donnée pour l'instant." });
+  const modeNav = React.createElement("div", { className: "subnav" }, [["profil", "👤 Profil"], ["compare", "⚔️ Comparaison"]].map(([id, label]) => React.createElement("button", { key: id, className: "subnav-btn" + (mode === id ? " sel" : ""), onClick: () => setMode(id) }, label)));
+  if (mode === "compare")
+    return React.createElement("div", { className: "stack" }, modeNav, React.createElement(CompareView, { players, betsByPlayer, me, colorMap }));
   const bets = betsByPlayer[player.id] || [];
   const s = computeStats(player, bets);
   const sk = computeStreaks(bets);
+  const prof = computeProfile(player, bets);
   const series = bankrollSeries(player, bets);
   const isMe = player.id === me;
+  const pColor = colorMap[player.id] || PLAYER_COLORS[0];
   const officialRanking = list.map((p) => ({ id: p.id, st: computeStats(p, betsByPlayer[p.id] || []) })).sort((a, b) => b.st.rendement - a.st.rendement || b.st.profit - a.st.profit);
   const isKing = officialRanking.length >= 2 && officialRanking[0].id === player.id && s.wins + s.losses + s.cashouts > 0;
   let myCode = null;
-  try {
-    myCode = localStorage.getItem("prono.recovery");
-  } catch (e) {}
+  try { myCode = localStorage.getItem("prono.recovery"); } catch (e) {}
   const depN = parseFloat(String(depAmount).replace(",", "."));
   const depOk = Number.isFinite(depN) && depN > 0;
   async function confirmDeposit() {
     if (!depOk || depBusy) return;
     setDepBusy(true);
-    try {
-      await onDeposit(depN);
-      setDepAmount("");
-      setShowDeposit(false);
-    } finally {
-      setDepBusy(false);
-    }
+    try { await onDeposit(depN); setDepAmount(""); setShowDeposit(false); } finally { setDepBusy(false); }
   }
-  return /* @__PURE__ */ React.createElement("div", { className: "stack" }, /* @__PURE__ */ React.createElement("div", { className: "filter-row scroll" }, list.map((p) => /* @__PURE__ */ React.createElement(
-    "button",
-    {
-      key: p.id,
-      className: "chip" + (p.id === player.id ? " sel" : ""),
-      onClick: () => setStatsFor(p.id)
-    },
-    p.emoji,
-    " ",
-    p.id === me ? "Moi" : p.name
-  ))), /* @__PURE__ */ React.createElement("div", { className: "stats-hero" }, /* @__PURE__ */ React.createElement("div", { className: "stats-name" }, player.emoji, " ", player.name), /* @__PURE__ */ React.createElement("div", { className: "stats-profit " + (s.rendement > 0 ? "pos" : s.rendement < 0 ? "neg" : "") }, (s.rendement > 0 ? "+" : "") + (s.rendement * 100).toFixed(1), " %"), /* @__PURE__ */ React.createElement("div", { className: "muted small" }, "rentabilit\xE9 \xB7 ", signEUR(s.profit), " net sur ", EUR(s.totalIn), " investis", s.redeposits > 0 && ` (d\xE9part ${EUR(+player.start || 0)} + ${EUR(s.redeposits)} red\xE9pos\xE9s)`)), isMe && /* @__PURE__ */ React.createElement("div", { className: "deposit-card" }, !showDeposit ? /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: () => setShowDeposit(true) }, "\u{1F4B0} Red\xE9poser des fonds") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("label", { className: "field" }, /* @__PURE__ */ React.createElement("span", null, "Montant du red\xE9p\xF4t (\u20AC)"), /* @__PURE__ */ React.createElement(
-    "input",
-    {
-      type: "text",
-      inputMode: "decimal",
-      value: depAmount,
-      placeholder: "30",
-      autoFocus: true,
-      onChange: (e) => setDepAmount(e.target.value)
-    }
-  )), /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "Le red\xE9p\xF4t augmente ta bankroll mais aussi ton total investi : ta rentabilit\xE9 % (et donc ton classement) en tiendra compte."), /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: () => {
-    setShowDeposit(false);
-    setDepAmount("");
-  } }, "Annuler"), /* @__PURE__ */ React.createElement("button", { className: "primary", disabled: !depOk || depBusy, onClick: confirmDeposit }, depBusy ? "\u2026" : "Confirmer")))), isMe && /* @__PURE__ */ React.createElement("div", { className: "deposit-card" }, /* @__PURE__ */ React.createElement("div", { className: "backup-row" }, /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: exportJSON }, "\u{1F4BE} Exporter la comp\xE9t'"), /* @__PURE__ */ React.createElement("label", { className: "secondary file-btn" }, "\u{1F4C2} Importer", /* @__PURE__ */ React.createElement("input", { type: "file", accept: "application/json", hidden: true, onChange: onPickBackup }))), myCode && /* @__PURE__ */ React.createElement("p", { className: "muted small" }, "\u{1F511} Code de r\xE9cup\xE9ration de ce compte : ", /* @__PURE__ */ React.createElement("span", { className: "code-inline" }, myCode), " \u2014 garde-le pr\xE9cieusement pour changer d'appareil."), pendingRestore && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "Restaurer \xAB ", pendingRestore.name, " \xBB \xE9crasera les donn\xE9es actuelles des joueurs pr\xE9sents dans le fichier, pour tout le monde."), /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: () => setPendingRestore(null) }, "Annuler"), /* @__PURE__ */ React.createElement("button", { className: "primary", onClick: () => {
-    onRestore(pendingRestore.data);
-    setPendingRestore(null);
-  } }, "Restaurer")))), /* @__PURE__ */ React.createElement("div", { className: "stat-grid" }, /* @__PURE__ */ React.createElement(Stat, { label: "Bankroll dispo", value: EUR(s.bankroll), tone: s.bankroll < 0 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "En jeu", value: EUR(s.enJeu) }), /* @__PURE__ */ React.createElement(Stat, { label: "Total investi", value: EUR(s.totalIn) }), /* @__PURE__ */ React.createElement(Stat, { label: "Rendement", value: (s.rendement * 100).toFixed(1) + " %", tone: s.rendement > 0 ? "pos" : s.rendement < 0 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "ROI / mises", value: (s.roi * 100).toFixed(1) + " %", tone: s.roi > 0 ? "pos" : s.roi < 0 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "R\xE9ussite \xB7 hors fun", value: s.winsBase + s.lossesBase > 0 ? Math.round(s.winRate * 100) + " %" : "\u2014" }), /* @__PURE__ */ React.createElement(Stat, { label: "Bilan", value: `${s.wins}V \xB7 ${s.losses}D \xB7 ${s.cashouts}C \xB7 ${s.refunds}R` }), /* @__PURE__ */ React.createElement(Stat, { label: "Cote moyenne", value: s.coteMoy > 0 ? s.coteMoy.toFixed(2) : "\u2014" }), /* @__PURE__ */ React.createElement(Stat, { label: "Tickets", value: String(s.total) }), /* @__PURE__ */ React.createElement(Stat, { label: "S\xE9rie en cours", value: sk.curWin >= 1 ? "🔥 " + sk.curWin + " V" : sk.curLoss >= 1 ? "❄️ " + sk.curLoss + " D" : "\u2014", tone: sk.curWin >= 2 ? "pos" : sk.curLoss >= 2 ? "neg" : "" }), /* @__PURE__ */ React.createElement(Stat, { label: "Records s\xE9ries", value: "🔥 " + sk.bestWin + " \xB7 ❄️ " + sk.worstLoss }), /* @__PURE__ */ React.createElement(Stat, { label: "Succ\xE8s", value: Object.keys(badges[player.id] || {}).filter((b) => b !== "roi").length + (isKing ? 1 : 0) + " / " + BADGES.length })), /* @__PURE__ */ React.createElement("h2", { className: "section-title" }, "Succ\xE8s"), /* @__PURE__ */ React.createElement("div", { className: "badge-grid" }, BADGES.map((def) => {
-    const ts = def.id === "roi" ? (isKing ? Date.now() : null) : (badges[player.id] || {})[def.id];
-    return /* @__PURE__ */ React.createElement("div", { key: def.id, className: "badge-card" + (ts ? " on" : "") }, /* @__PURE__ */ React.createElement("div", { className: "b-icon" }, def.icon), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "b-title" }, def.title), /* @__PURE__ */ React.createElement("div", { className: "b-desc" }, def.desc), ts ? /* @__PURE__ */ React.createElement("div", { className: "b-date" }, def.id === "roi" ? "Actuellement en t\xEAte \u{1F451}" : "D\xE9bloqu\xE9 le " + new Date(ts).toLocaleDateString("fr-FR")) : null));
-  })), series.length >= 2 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "chart-card" }, /* @__PURE__ */ React.createElement("div", { className: "chart-title" }, "Bankroll (\u20AC) \xB7 d\xE9part, d\xE9p\xF4ts et paris r\xE9gl\xE9s"), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 180 }, /* @__PURE__ */ React.createElement(LineChart, { data: series, margin: { top: 8, right: 8, bottom: 0, left: -10 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false, domain: ["auto", "auto"] }), /* @__PURE__ */ React.createElement(
-    Tooltip,
-    {
-      formatter: (v) => [EUR(v), "Bankroll"],
-      contentStyle: { background: "#0c2e1d", border: "1px solid #2c5a40", borderRadius: 10, color: "#f2f0e4" }
-    }
-  ), /* @__PURE__ */ React.createElement(ReferenceLine, { y: +player.start || 0, stroke: "#2c5a40", strokeDasharray: "4 4" }), /* @__PURE__ */ React.createElement(Line, { type: "monotone", dataKey: "bankroll", stroke: "#f5c543", strokeWidth: 2.5, dot: { r: 3, fill: "#f5c543" } })))), /* @__PURE__ */ React.createElement("div", { className: "chart-card" }, /* @__PURE__ */ React.createElement("div", { className: "chart-title" }, "Rendement (%) \xB7 b\xE9n\xE9fice \xF7 total investi"), /* @__PURE__ */ React.createElement(ResponsiveContainer, { width: "100%", height: 180 }, /* @__PURE__ */ React.createElement(LineChart, { data: series, margin: { top: 8, right: 8, bottom: 0, left: -16 } }, /* @__PURE__ */ React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }), /* @__PURE__ */ React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false, domain: ["auto", "auto"] }), /* @__PURE__ */ React.createElement(
-    Tooltip,
-    {
-      formatter: (v) => [v.toLocaleString("fr-FR") + " %", "Rendement"],
-      contentStyle: { background: "#0c2e1d", border: "1px solid #2c5a40", borderRadius: 10, color: "#f2f0e4" }
-    }
-  ), /* @__PURE__ */ React.createElement(ReferenceLine, { y: 0, stroke: "#2c5a40", strokeDasharray: "4 4" }), /* @__PURE__ */ React.createElement(Line, { type: "monotone", dataKey: "rendement", stroke: "#5cc97a", strokeWidth: 2.5, dot: { r: 3, fill: "#5cc97a" } }))))), bets.length === 0 && /* @__PURE__ */ React.createElement(Empty, { icon: "\u{1F39F}\uFE0F", text: "Aucun ticket pour ce joueur." }), isMe && /* @__PURE__ */ React.createElement("div", { className: "deposit-card" }, !confirmDelete ? /* @__PURE__ */ React.createElement("button", { className: "secondary danger", onClick: () => setConfirmDelete(true) }, "\u{1F5D1} Supprimer mon compte") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { className: "form-hint warn" }, "Supprimer d\xE9finitivement ton compte \xAB ", player.name, " \xBB", bets.length > 0 ? ` ainsi que tes ${bets.length} pari${bets.length > 1 ? "s" : ""}` : "", " ? Cette action est irr\xE9versible et te sortira du classement pour tout le groupe."), /* @__PURE__ */ React.createElement("div", { className: "two-cols" }, /* @__PURE__ */ React.createElement("button", { className: "secondary", onClick: () => setConfirmDelete(false) }, "Annuler"), /* @__PURE__ */ React.createElement("button", { className: "primary", onClick: () => {
-    onDeletePlayer(player.id);
-    setConfirmDelete(false);
-  } }, "Supprimer")))));
+  const record = (ico, lbl, val, tone, det) => React.createElement("div", { className: "record" },
+    React.createElement("div", { className: "rec-ico" }, ico),
+    React.createElement("div", null,
+      React.createElement("div", { className: "rec-lbl" }, lbl),
+      React.createElement("div", { className: "rec-val " + (tone || "") }, val),
+      det && React.createElement("div", { className: "rec-det" }, det)));
+  const records = React.createElement(React.Fragment, null,
+    React.createElement("h3", { className: "sub-title" }, "Records"),
+    React.createElement("div", { className: "records-grid" },
+      record("🏆", "Meilleur pari", prof.bestBet ? signEUR(prof.bestBet.v) : "—", prof.bestBet ? "pos" : "", prof.bestBet ? "« " + prof.bestBet.label + " »" : null),
+      record("💣", "Pire pari", prof.worstBet ? signEUR(prof.worstBet.v) : "—", prof.worstBet ? "neg" : "", prof.worstBet ? "« " + prof.worstBet.label + " »" : null),
+      record("🎯", "Plus grosse cote gagnée", prof.bestCote ? "@ " + prof.bestCote.v.toFixed(2) : "—", "", prof.bestCote ? "« " + prof.bestCote.label + " »" : null),
+      record("🔥", "Plus longue série V", sk.bestWin + " d'affilée", ""),
+      record("💀", "Plus longue série D", sk.worstLoss + " d'affilée", "")));
+  return React.createElement("div", { className: "stack" },
+    modeNav,
+    React.createElement("div", { className: "filter-row scroll" }, list.map((p) => React.createElement("button", { key: p.id, className: "chip" + (p.id === player.id ? " sel" : ""), onClick: () => setStatsFor(p.id) },
+      React.createElement("i", { className: "pcolor-dot", style: { background: colorMap[p.id] || PLAYER_COLORS[0] } }), p.id === me ? "Moi" : p.name))),
+    React.createElement("div", { className: "stats-hero" },
+      React.createElement("div", { className: "stats-name" }, React.createElement("i", { className: "pcolor-dot big", style: { background: pColor } }), player.emoji, " ", player.name),
+      React.createElement("div", { className: "stats-profit " + (s.rendement > 0 ? "pos" : s.rendement < 0 ? "neg" : "") }, (s.rendement > 0 ? "+" : "") + (s.rendement * 100).toFixed(1), " %"),
+      React.createElement("div", { className: "muted small" }, "rentabilité · ", signEUR(s.profit), " net sur ", EUR(s.totalIn), " investis", s.redeposits > 0 && " (départ " + EUR(+player.start || 0) + " + " + EUR(s.redeposits) + " redéposés)")),
+    isMe && React.createElement("div", { className: "deposit-card" },
+      !showDeposit
+        ? React.createElement("button", { className: "secondary", onClick: () => setShowDeposit(true) }, "💰 Redéposer des fonds")
+        : React.createElement(React.Fragment, null,
+            React.createElement("label", { className: "field" }, React.createElement("span", null, "Montant du redépôt (€)"), React.createElement("input", { type: "text", inputMode: "decimal", value: depAmount, placeholder: "30", autoFocus: true, onChange: (e) => setDepAmount(e.target.value) })),
+            React.createElement("p", { className: "form-hint warn" }, "Le redépôt augmente ta bankroll mais aussi ton total investi : ta rentabilité % (et donc ton classement) en tiendra compte."),
+            React.createElement("div", { className: "two-cols" },
+              React.createElement("button", { className: "secondary", onClick: () => { setShowDeposit(false); setDepAmount(""); } }, "Annuler"),
+              React.createElement("button", { className: "primary", disabled: !depOk || depBusy, onClick: confirmDeposit }, depBusy ? "…" : "Confirmer")))),
+    isMe && React.createElement("div", { className: "deposit-card" },
+      React.createElement("div", { className: "backup-row" },
+        React.createElement("button", { className: "secondary", onClick: exportJSON }, "💾 Exporter la compét'"),
+        React.createElement("label", { className: "secondary file-btn" }, "📂 Importer", React.createElement("input", { type: "file", accept: "application/json", hidden: true, onChange: onPickBackup }))),
+      myCode && React.createElement("p", { className: "muted small" }, "🔑 Code de récupération de ce compte : ", React.createElement("span", { className: "code-inline" }, myCode), " — garde-le précieusement pour changer d'appareil."),
+      pendingRestore && React.createElement(React.Fragment, null,
+        React.createElement("p", { className: "form-hint warn" }, "Restaurer « " + pendingRestore.name + " » écrasera les données actuelles des joueurs présents dans le fichier, pour tout le monde."),
+        React.createElement("div", { className: "two-cols" },
+          React.createElement("button", { className: "secondary", onClick: () => setPendingRestore(null) }, "Annuler"),
+          React.createElement("button", { className: "primary", onClick: () => { onRestore(pendingRestore.data); setPendingRestore(null); } }, "Restaurer")))),
+    React.createElement("div", { className: "stat-grid" },
+      React.createElement(Stat, { label: "Profit total", value: signEUR(s.profit), tone: s.profit > 0 ? "pos" : s.profit < 0 ? "neg" : "" }),
+      React.createElement(Stat, { label: "Bankroll dispo", value: EUR(s.bankroll), tone: s.bankroll < 0 ? "neg" : "" }),
+      React.createElement(Stat, { label: "En jeu", value: EUR(s.enJeu) }),
+      React.createElement(Stat, { label: "Total investi", value: EUR(s.totalIn) }),
+      React.createElement(Stat, { label: "Rendement", value: (s.rendement * 100).toFixed(1) + " %", tone: s.rendement > 0 ? "pos" : s.rendement < 0 ? "neg" : "" }),
+      React.createElement(Stat, { label: "ROI / mises", value: (s.roi * 100).toFixed(1) + " %", tone: s.roi > 0 ? "pos" : s.roi < 0 ? "neg" : "" }),
+      React.createElement(Stat, { label: "Winrate", value: s.winsWR + s.lossesWR > 0 ? Math.round(s.winRate * 100) + " %" : "—" }),
+      React.createElement(Stat, { label: "Cote moyenne jouée", value: s.coteMoy > 0 ? s.coteMoy.toFixed(2) : "—" }),
+      React.createElement(Stat, { label: "Cote moyenne gagnante", value: s.coteMoyWin > 0 ? s.coteMoyWin.toFixed(2) : "—" }),
+      React.createElement(Stat, { label: "Tickets", value: String(s.total) }),
+      React.createElement(Stat, { label: "Mise totale", value: EUR(prof.miseTotale) }),
+      React.createElement(Stat, { label: "Mise moyenne", value: EUR(prof.miseMoyenne) }),
+      React.createElement(Stat, { label: "Gain moyen", value: prof.gainMoyen > 0 ? signEUR(prof.gainMoyen) : "—", tone: prof.gainMoyen > 0 ? "pos" : "" }),
+      React.createElement(Stat, { label: "Perte moyenne", value: prof.perteMoyenne < 0 ? signEUR(prof.perteMoyenne) : "—", tone: prof.perteMoyenne < 0 ? "neg" : "" }),
+      React.createElement(Stat, { label: "Bilan", value: s.wins + "V · " + s.losses + "D · " + s.refunds + "R" }),
+      React.createElement(Stat, { label: "Série en cours", value: sk.curWin >= 1 ? "🔥 " + sk.curWin + " V" : sk.curLoss >= 1 ? "❄️ " + sk.curLoss + " D" : "—", tone: sk.curWin >= 2 ? "pos" : sk.curLoss >= 2 ? "neg" : "" }),
+      React.createElement(Stat, { label: "Succès", value: Object.keys(badges[player.id] || {}).filter((b) => b !== "roi").length + (isKing ? 1 : 0) + " / " + BADGES.length })),
+    records,
+    React.createElement("h3", { className: "sub-title" }, "Succès"),
+    React.createElement("div", { className: "badge-grid" }, BADGES.map((def) => {
+      const ts = def.id === "roi" ? (isKing ? Date.now() : null) : (badges[player.id] || {})[def.id];
+      return React.createElement("div", { key: def.id, className: "badge-card" + (ts ? " on" : "") },
+        React.createElement("div", { className: "b-icon" }, def.icon),
+        React.createElement("div", null,
+          React.createElement("div", { className: "b-title" }, def.title),
+          React.createElement("div", { className: "b-desc" }, def.desc),
+          ts ? React.createElement("div", { className: "b-date" }, def.id === "roi" ? "Actuellement en tête 👑" : "Débloqué le " + new Date(ts).toLocaleDateString("fr-FR")) : null));
+    })),
+    series.length >= 2 && React.createElement(React.Fragment, null,
+      React.createElement("div", { className: "chart-card" },
+        React.createElement("div", { className: "chart-title" }, "Bankroll (€) · départ, dépôts et paris réglés"),
+        React.createElement(ResponsiveContainer, { width: "100%", height: 180 },
+          React.createElement(LineChart, { data: series, margin: { top: 8, right: 8, bottom: 0, left: -10 } },
+            React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }),
+            React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false, domain: ["auto", "auto"] }),
+            React.createElement(Tooltip, { formatter: (v) => [EUR(v), "Bankroll"], contentStyle: { background: "#0c2e1d", border: "1px solid #2c5a40", borderRadius: 10, color: "#f2f0e4" } }),
+            React.createElement(ReferenceLine, { y: +player.start || 0, stroke: "#2c5a40", strokeDasharray: "4 4" }),
+            React.createElement(Line, { type: "monotone", dataKey: "bankroll", stroke: pColor, strokeWidth: 2.5, dot: { r: 3, fill: pColor } })))),
+      React.createElement("div", { className: "chart-card" },
+        React.createElement("div", { className: "chart-title" }, "Rendement (%) · bénéfice ÷ total investi"),
+        React.createElement(ResponsiveContainer, { width: "100%", height: 180 },
+          React.createElement(LineChart, { data: series, margin: { top: 8, right: 8, bottom: 0, left: -16 } },
+            React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }),
+            React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false, domain: ["auto", "auto"] }),
+            React.createElement(Tooltip, { formatter: (v) => [v.toLocaleString("fr-FR") + " %", "Rendement"], contentStyle: { background: "#0c2e1d", border: "1px solid #2c5a40", borderRadius: 10, color: "#f2f0e4" } }),
+            React.createElement(ReferenceLine, { y: 0, stroke: "#2c5a40", strokeDasharray: "4 4" }),
+            React.createElement(Line, { type: "monotone", dataKey: "rendement", stroke: pColor, strokeWidth: 2.5, dot: { r: 3, fill: pColor } }))))),
+    bets.length === 0 && React.createElement(Empty, { icon: "🎟️", text: "Aucun ticket pour ce joueur." }),
+    isMe && React.createElement("div", { className: "deposit-card" },
+      !confirmDelete
+        ? React.createElement("button", { className: "secondary danger", onClick: () => setConfirmDelete(true) }, "🗑 Supprimer mon compte")
+        : React.createElement(React.Fragment, null,
+            React.createElement("p", { className: "form-hint warn" }, "Supprimer définitivement ton compte « " + player.name + " »" + (bets.length > 0 ? " ainsi que tes " + bets.length + " pari" + (bets.length > 1 ? "s" : "") : "") + " ? Cette action est irréversible et te sortira du classement pour tout le groupe."),
+            React.createElement("div", { className: "two-cols" },
+              React.createElement("button", { className: "secondary", onClick: () => setConfirmDelete(false) }, "Annuler"),
+              React.createElement("button", { className: "primary", onClick: () => { onDeletePlayer(player.id); setConfirmDelete(false); } }, "Supprimer")))));
 }
+function CompareView({ players, betsByPlayer, me, colorMap = {} }) {
+  const list = Object.values(players).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const [metric, setMetric] = useState("profit");
+  const [aId, setAId] = useState("");
+  const [bId, setBId] = useState("");
+  if (list.length < 2) return React.createElement(Empty, { icon: "⚔️", text: "Il faut au moins deux joueurs pour comparer." });
+  const pa = players[aId] || players[me] || list[0];
+  const pb = players[bId] || list.find((p) => p.id !== pa.id) || list[1] || list[0];
+  const A = { p: pa, s: computeStats(pa, betsByPlayer[pa.id] || []), sk: computeStreaks(betsByPlayer[pa.id] || []), pr: computeProfile(pa, betsByPlayer[pa.id] || []) };
+  const B = { p: pb, s: computeStats(pb, betsByPlayer[pb.id] || []), sk: computeStreaks(betsByPlayer[pb.id] || []), pr: computeProfile(pb, betsByPlayer[pb.id] || []) };
+  const cA = colorMap[pa.id] || PLAYER_COLORS[0];
+  const cB = colorMap[pb.id] || PLAYER_COLORS[1];
+  const series = pa.id !== pb.id ? buildCompareSeries(players, betsByPlayer, [pa.id, pb.id], metric) : null;
+  const fmtMetric = (v) => metric === "rendement" ? (v.toLocaleString("fr-FR") + " %") : EUR(v);
+  const wA = A.pr.wonCount, wB = B.pr.wonCount;
+  const faceTxt = wA === wB ? "⚖️ Égalité parfaite (" + wA + " – " + wB + ")"
+    : wA > wB ? "🏆 " + pa.name + " domine actuellement " + pb.name + " (" + wA + " – " + wB + ")"
+    : "🏆 " + pb.name + " domine actuellement " + pa.name + " (" + wB + " – " + wA + ")";
+  const bv = (r) => r ? r.v : null;
+  const rows = [
+    ["Profit", signEUR(A.s.profit), signEUR(B.s.profit), A.s.profit > B.s.profit ? "a" : A.s.profit < B.s.profit ? "b" : ""],
+    ["ROI / mises", (A.s.roi * 100).toFixed(1) + " %", (B.s.roi * 100).toFixed(1) + " %", A.s.roi > B.s.roi ? "a" : A.s.roi < B.s.roi ? "b" : ""],
+    ["Winrate", A.s.winsWR + A.s.lossesWR > 0 ? Math.round(A.s.winRate * 100) + " %" : "—", B.s.winsWR + B.s.lossesWR > 0 ? Math.round(B.s.winRate * 100) + " %" : "—", A.s.winRate > B.s.winRate ? "a" : A.s.winRate < B.s.winRate ? "b" : ""],
+    ["Paris gagnés", String(A.pr.wonCount), String(B.pr.wonCount), A.pr.wonCount > B.pr.wonCount ? "a" : A.pr.wonCount < B.pr.wonCount ? "b" : ""],
+    ["Paris perdus", String(A.pr.lostCount), String(B.pr.lostCount), A.pr.lostCount < B.pr.lostCount ? "a" : A.pr.lostCount > B.pr.lostCount ? "b" : ""],
+    ["Cote moyenne jouée", A.s.coteMoy > 0 ? A.s.coteMoy.toFixed(2) : "—", B.s.coteMoy > 0 ? B.s.coteMoy.toFixed(2) : "—", A.s.coteMoy > B.s.coteMoy ? "a" : A.s.coteMoy < B.s.coteMoy ? "b" : ""],
+    ["Cote moyenne gagnante", A.s.coteMoyWin > 0 ? A.s.coteMoyWin.toFixed(2) : "—", B.s.coteMoyWin > 0 ? B.s.coteMoyWin.toFixed(2) : "—", A.s.coteMoyWin > B.s.coteMoyWin ? "a" : A.s.coteMoyWin < B.s.coteMoyWin ? "b" : ""],
+    ["Meilleur pari", A.pr.bestBet ? signEUR(A.pr.bestBet.v) : "—", B.pr.bestBet ? signEUR(B.pr.bestBet.v) : "—", (bv(A.pr.bestBet) == null && bv(B.pr.bestBet) == null) ? "" : (bv(A.pr.bestBet) || -1e9) > (bv(B.pr.bestBet) || -1e9) ? "a" : "b"],
+    ["Pire pari", A.pr.worstBet ? signEUR(A.pr.worstBet.v) : "—", B.pr.worstBet ? signEUR(B.pr.worstBet.v) : "—", (bv(A.pr.worstBet) == null && bv(B.pr.worstBet) == null) ? "" : (bv(A.pr.worstBet) == null ? "a" : bv(B.pr.worstBet) == null ? "b" : bv(A.pr.worstBet) > bv(B.pr.worstBet) ? "a" : "b")],
+    ["Série max V", String(A.sk.bestWin), String(B.sk.bestWin), A.sk.bestWin > B.sk.bestWin ? "a" : A.sk.bestWin < B.sk.bestWin ? "b" : ""]
+  ];
+  return React.createElement("div", { className: "stack" },
+    React.createElement("h2", { className: "section-title" }, "⚔️ Comparaison"),
+    React.createElement("div", { className: "compare-selectors" },
+      React.createElement("label", { className: "field" }, React.createElement("span", null, "Joueur A"), React.createElement("select", { value: pa.id, onChange: (e) => setAId(e.target.value) }, list.map((p) => React.createElement("option", { key: p.id, value: p.id }, p.emoji + " " + p.name)))),
+      React.createElement("div", { className: "vs-badge" }, "VS"),
+      React.createElement("label", { className: "field" }, React.createElement("span", null, "Joueur B"), React.createElement("select", { value: pb.id, onChange: (e) => setBId(e.target.value) }, list.map((p) => React.createElement("option", { key: p.id, value: p.id }, p.emoji + " " + p.name))))),
+    pa.id === pb.id
+      ? React.createElement(Empty, { icon: "⚔️", text: "Choisis deux joueurs différents." })
+      : React.createElement(React.Fragment, null,
+          React.createElement("div", { className: "face-banner" }, faceTxt),
+          React.createElement("div", { className: "compare-table" },
+            React.createElement("div", { className: "cmp-head" },
+              React.createElement("span", null, ""),
+              React.createElement("span", { style: { color: cA } }, pa.emoji + " " + pa.name),
+              React.createElement("span", { style: { color: cB } }, pb.emoji + " " + pb.name)),
+            rows.map((r, i) => React.createElement("div", { key: i, className: "cmp-row" },
+              React.createElement("span", { className: "cmp-lbl" }, r[0]),
+              React.createElement("span", { className: "cmp-a" + (r[3] === "a" ? " win" : "") }, r[1]),
+              React.createElement("span", { className: "cmp-b" + (r[3] === "b" ? " win" : "") }, r[2])))),
+          React.createElement("div", { className: "filter-row" }, [["profit", "Profit cumulé"], ["bankroll", "Bankroll"], ["rendement", "Rendement"]].map(([id, label]) => React.createElement("button", { key: id, className: "chip" + (metric === id ? " sel" : ""), onClick: () => setMetric(id) }, label))),
+          series
+            ? React.createElement("div", { className: "chart-card" },
+                React.createElement("div", { className: "chart-title" }, metric === "profit" ? "Profit cumulé (€)" : metric === "bankroll" ? "Bankroll (€)" : "Rendement (%)"),
+                React.createElement(ResponsiveContainer, { width: "100%", height: 200 },
+                  React.createElement(LineChart, { data: series.data, margin: { top: 8, right: 8, bottom: 0, left: -16 } },
+                    React.createElement(XAxis, { dataKey: "label", tick: { fill: "#9fc1ab", fontSize: 10 }, tickLine: false, axisLine: { stroke: "#2c5a40" } }),
+                    React.createElement(YAxis, { tick: { fill: "#9fc1ab", fontSize: 11 }, tickLine: false, axisLine: false, domain: ["auto", "auto"] }),
+                    React.createElement(Tooltip, { formatter: (v, key) => [fmtMetric(v), players[key] ? players[key].name : key], contentStyle: { background: "#0c2e1d", border: "1px solid #2c5a40", borderRadius: 10, color: "#f2f0e4", fontSize: 12 } }),
+                    React.createElement(ReferenceLine, { y: 0, stroke: "#2c5a40", strokeDasharray: "4 4" }),
+                    React.createElement(Line, { type: "monotone", dataKey: pa.id, stroke: cA, strokeWidth: 2.5, dot: false }),
+                    React.createElement(Line, { type: "monotone", dataKey: pb.id, stroke: cB, strokeWidth: 2.5, dot: false }))),
+                React.createElement("div", { className: "legend-row" },
+                  React.createElement("span", { className: "legend-item" }, React.createElement("i", { style: { background: cA } }), pa.emoji + " " + pa.name),
+                  React.createElement("span", { className: "legend-item" }, React.createElement("i", { style: { background: cB } }), pb.emoji + " " + pb.name)))
+            : React.createElement(Empty, { icon: "📈", text: "Pas encore assez de paris réglés pour le graphique." })));
+}
+
 function Stat({ label, value, tone }) {
   return /* @__PURE__ */ React.createElement("div", { className: "stat" }, /* @__PURE__ */ React.createElement("small", null, label), /* @__PURE__ */ React.createElement("strong", { className: tone || "" }, value));
 }
@@ -1720,6 +2194,166 @@ function Empty({ icon, text }) {
 function Shell({ children }) {
   return /* @__PURE__ */ React.createElement("div", { className: "app" }, /* @__PURE__ */ React.createElement("style", null, CSS), children);
 }
+function PronoInput({ mkey, pred, locked, onProno }) {
+  const [a, setA] = useState(pred ? String(pred.a) : "");
+  const [b, setB] = useState(pred ? String(pred.b) : "");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (pred) { setA(String(pred.a)); setB(String(pred.b)); } }, [pred ? pred.at : 0]);
+  const aN = parseInt(a, 10), bN = parseInt(b, 10);
+  const ok = Number.isInteger(aN) && aN >= 0 && aN <= 30 && Number.isInteger(bN) && bN >= 0 && bN <= 30;
+  async function go() {
+    if (!ok || saving) return;
+    setSaving(true);
+    try { await onProno(mkey, aN, bN); } finally { setSaving(false); }
+  }
+  return React.createElement("div", { className: "prono-row" },
+    React.createElement("span", { className: "prono-lbl" }, "🎯"),
+    React.createElement("input", { className: "prono-score", type: "number", inputMode: "numeric", min: "0", max: "30", value: a, placeholder: "–", onChange: (e) => setA(e.target.value) }),
+    React.createElement("span", { className: "prono-dash" }, "–"),
+    React.createElement("input", { className: "prono-score", type: "number", inputMode: "numeric", min: "0", max: "30", value: b, placeholder: "–", onChange: (e) => setB(e.target.value) }),
+    React.createElement("button", { className: "prono-ok", disabled: !ok || saving, onClick: go }, pred ? "Modifier" : "Valider"));
+}
+function ResultInput({ mkey, res, onResult }) {
+  const [a, setA] = useState(res ? String(res.a) : "");
+  const [b, setB] = useState(res ? String(res.b) : "");
+  const [confirm, setConfirm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const aN = parseInt(a, 10), bN = parseInt(b, 10);
+  const ok = Number.isInteger(aN) && aN >= 0 && aN <= 30 && Number.isInteger(bN) && bN >= 0 && bN <= 30;
+  async function go() {
+    if (!ok || saving) return;
+    setSaving(true);
+    try { await onResult(mkey, aN, bN); setConfirm(false); } finally { setSaving(false); }
+  }
+  return React.createElement("div", { className: "result-box" },
+    React.createElement("div", { className: "prono-row" },
+      React.createElement("span", { className: "prono-lbl" }, "🏁 Score final"),
+      React.createElement("input", { className: "prono-score", type: "number", inputMode: "numeric", min: "0", max: "30", value: a, placeholder: "–", onChange: (e) => setA(e.target.value) }),
+      React.createElement("span", { className: "prono-dash" }, "–"),
+      React.createElement("input", { className: "prono-score", type: "number", inputMode: "numeric", min: "0", max: "30", value: b, placeholder: "–", onChange: (e) => setB(e.target.value) }),
+      res
+        ? (confirm
+            ? React.createElement("button", { className: "prono-ok danger", disabled: !ok || saving, onClick: go }, "Confirmer")
+            : React.createElement("button", { className: "prono-ok", disabled: !ok, onClick: () => setConfirm(true) }, "Corriger"))
+        : React.createElement("button", { className: "prono-ok", disabled: !ok || saving, onClick: go }, "Valider")),
+    res && !confirm && React.createElement("small", { className: "muted" }, "Résultat déjà saisi (" + res.a + "–" + res.b + "). Tu peux le corriger si besoin."));
+}
+function PronoView({ players, me, pronos = {}, results = {}, onProno, onResult, section = "all" }) {
+  const [view, setView] = useState("avenir");
+  const nowMs = Date.now();
+  const colorMap = playerColorMap(players);
+  const ranking = buildPronoRanking(players, pronos, results);
+  const enriched = CDM_MATCHES.map((m, idx) => ({ m, idx, mk: matchKey(idx), ko: new Date(m[0] + "T" + m[1] + ":00").getTime() }))
+    .filter(({ m }) => m[2] === "G" && m[5]);
+  const isFinalMk = (mk) => isFinalResult(results[mk]);
+  const upcoming = enriched.filter((x) => nowMs < x.ko).sort((a, b) => a.ko - b.ko);
+  const toScore = enriched.filter((x) => nowMs >= x.ko && !isFinalMk(x.mk)).sort((a, b) => b.ko - a.ko);
+  const done = enriched.filter((x) => isFinalMk(x.mk)).sort((a, b) => b.ko - a.ko);
+  const matchTitle = (m) => teamLabel(m[4]) + " — " + teamLabel(m[5]);
+  const fmtKo = (ko) => new Date(ko).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) + " " + new Date(ko).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  /* ===== Sous-catégorie « Classement Pronostics » — indépendante de l'argent et des paris ===== */
+  const rankingBlock = React.createElement(React.Fragment, null,
+    React.createElement("h2", { className: "section-title" }, "🏆 Classement Pronostics"),
+    React.createElement("p", { className: "muted small" }, "Score exact = 5 pts · bon vainqueur ou bon nul = 3 pts · bon écart de buts = 1 pt. Classement indépendant des paris et de l'argent."),
+    ranking.length > 0
+      ? ranking.map((r, i) => React.createElement("div", { key: r.p.id, className: "rank-card" + (r.p.id === me ? " mine" : "") },
+          React.createElement("div", { className: "rank-pos" + (i === 0 ? " gold" : "") }, i === 0 ? "👑" : i + 1),
+          React.createElement("div", { className: "rank-avatar" }, r.p.emoji),
+          React.createElement("div", { className: "rank-main" },
+            React.createElement("div", { className: "rank-name" },
+              React.createElement("i", { className: "pcolor-dot", style: { background: colorMap[r.p.id] || PLAYER_COLORS[0] } }),
+              r.p.name, r.p.id === me && React.createElement("span", { className: "me-chip" }, "moi")),
+            React.createElement("div", { className: "rank-meta" }, r.n + " pronostic" + (r.n > 1 ? "s" : "") + " · " + r.exact + " score" + (r.exact > 1 ? "s" : "") + " exact" + (r.exact > 1 ? "s" : "")),
+            React.createElement("div", { className: "rank-meta" }, "Moyenne " + r.avg.toFixed(1) + " pt / pronostic")),
+          React.createElement("div", { className: "rank-right" },
+            React.createElement("div", { className: "rank-profit pos" }, r.pts),
+            React.createElement("div", { className: "rank-sub" }, "point" + (r.pts > 1 ? "s" : "")))))
+      : React.createElement(Empty, { icon: "🎯", text: "Aucun pronostic enregistré pour l'instant." }));
+  /* Liste des pronostics de TOUS les joueurs pour un match (visible avant, pendant et après). */
+  const pronoListFor = (mk, res) => {
+    const preds = pronos[mk] || {};
+    const final = isFinalResult(res);
+    const lines = Object.keys(preds).map((pid) => ({ pid, pred: preds[pid], pts: final ? pronoPoints(preds[pid], res) : null }))
+      .filter((x) => players[x.pid] && x.pred)
+      .sort((a, b) => (b.pts || 0) - (a.pts || 0) || ((a.pred.at || 0) - (b.pred.at || 0)));
+    if (lines.length === 0) return React.createElement("small", { className: "muted" }, "Aucun pronostic enregistré pour ce match.");
+    return React.createElement(React.Fragment, null,
+      React.createElement("div", { className: "prono-list-title" }, "Pronostics des joueurs (" + lines.length + ")"),
+      React.createElement("ul", { className: "prono-list" }, lines.map((x) => {
+        const p = players[x.pid];
+        const cls = x.pts === 5 ? "exact" : x.pts > 0 ? "part" : x.pts === 0 ? "zero" : "";
+        return React.createElement("li", { key: x.pid, className: cls + (x.pid === me ? " mine" : "") },
+          React.createElement("span", null,
+            React.createElement("i", { className: "pcolor-dot", style: { background: colorMap[x.pid] || PLAYER_COLORS[0] } }),
+            " " + p.emoji + " " + p.name + (x.pid === me ? " (toi)" : "")),
+          React.createElement("span", { className: "prono-list-score" }, x.pred.a + "–" + x.pred.b),
+          x.pts != null ? React.createElement("b", null, "+" + x.pts) : React.createElement("b", { className: "muted" }, "🔒"));
+      })));
+  };
+  /* ===== Sous-catégorie « Pronostics » — saisie du score exact par match ===== */
+  const entryBlock = React.createElement(React.Fragment, null,
+    React.createElement("h2", { className: "section-title" }, "🎯 Pronostics"),
+    React.createElement("p", { className: "muted small" }, "Saisis le score exact des matchs de poule (un seul prono par match, modifiable jusqu'au coup d'envoi puis verrouillé). Les pronostics de tous les joueurs sont visibles."),
+    React.createElement("div", { className: "filter-row" }, [
+      ["avenir", "À pronostiquer (" + upcoming.length + ")"],
+      ["saisir", "En cours / à noter (" + toScore.length + ")"],
+      ["termine", "Terminés (" + done.length + ")"]
+    ].map(([id, label]) => React.createElement("button", { key: id, className: "chip" + (view === id ? " sel" : ""), onClick: () => setView(id) }, label))),
+    view === "avenir" && (upcoming.length === 0
+      ? React.createElement(Empty, { icon: "🎯", text: "Aucun match de poule à venir." })
+      : upcoming.map(({ m, mk, ko }) => {
+          const pred = (pronos[mk] || {})[me];
+          return React.createElement("div", { key: mk, className: "prono-card" },
+            React.createElement("div", { className: "prono-match" }, matchTitle(m)),
+            React.createElement("small", { className: "muted" }, "🕐 Coup d'envoi " + fmtKo(ko)),
+            me ? React.createElement(PronoInput, { mkey: mk, pred, locked: false, onProno })
+               : React.createElement("small", { className: "muted" }, "Inscris-toi pour pronostiquer."),
+            pronoListFor(mk, null));
+        })),
+    view === "saisir" && (toScore.length === 0
+      ? React.createElement(Empty, { icon: "🏁", text: "Aucun match en cours ou en attente de score." })
+      : toScore.map(({ m, mk, ko }) => {
+          const res = results[mk];
+          const status = matchStatusOf(m, res, nowMs);
+          const sMeta = MATCH_STATUS[status] || MATCH_STATUS.LIVE;
+          const hasScore = res && Number.isFinite(+res.a) && Number.isFinite(+res.b);
+          return React.createElement("div", { key: mk, className: "prono-card" },
+            React.createElement("div", { className: "prono-match" }, matchTitle(m)),
+            React.createElement("div", { className: "prono-liverow" },
+              React.createElement("span", { className: "cal-status " + sMeta.cls }, (status === "LIVE" || status === "HT") && React.createElement("span", { className: "live-dot" }), sMeta.label),
+              hasScore && React.createElement("span", { className: "cal-scoreline" }, (+res.a) + " – " + (+res.b)),
+              React.createElement("small", { className: "muted" }, "🔒 verrouillé · coup d'envoi " + fmtKo(ko))),
+            React.createElement(ResultInput, { mkey: mk, res, onResult }),
+            pronoListFor(mk, res));
+        })),
+    view === "termine" && (done.length === 0
+      ? React.createElement(Empty, { icon: "📊", text: "Aucun match terminé pour l'instant." })
+      : done.map(({ m, mk }) => {
+          const res = results[mk];
+          return React.createElement("div", { key: mk, className: "prono-card done" },
+            React.createElement("div", { className: "prono-match" }, matchTitle(m)),
+            React.createElement("div", { className: "prono-final" }, "🏁 Score final : " + res.a + " – " + res.b),
+            React.createElement(ResultInput, { mkey: mk, res, onResult }),
+            pronoListFor(mk, res));
+        })));
+  if (section === "ranking") return React.createElement("div", { className: "stack" }, rankingBlock);
+  if (section === "entry") return React.createElement("div", { className: "stack" }, entryBlock);
+  return React.createElement("div", { className: "stack" }, rankingBlock, entryBlock);
+}
+/* Onglet fusionné « Matchs & Pronostics » avec 3 sous-catégories : Matchs · Pronostics · Classement Pronostics. */
+function MatchsPronosView({ me, players, pronos = {}, results = {}, onProno, onResult }) {
+  const [sub, setSub] = useState("matchs");
+  return React.createElement("div", { className: "stack" },
+    React.createElement("div", { className: "subnav" }, [
+      ["matchs", "📅 Matchs"],
+      ["pronos", "🎯 Pronostics"],
+      ["classement", "🏆 Classement"]
+    ].map(([id, label]) => React.createElement("button", { key: id, className: "subnav-btn" + (sub === id ? " sel" : ""), onClick: () => setSub(id) }, label))),
+    sub === "matchs" && React.createElement(CalendarView, { me, pronos, results, onProno }),
+    sub === "pronos" && React.createElement(PronoView, { players, me, pronos, results, onProno, onResult, section: "entry" }),
+    sub === "classement" && React.createElement(PronoView, { players, me, pronos, results, onProno, onResult, section: "ranking" }));
+}
+
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -1975,10 +2609,10 @@ const CSS = `
 .ticket-nums .right{margin-left:auto;text-align:right}
 .ticket-nums .pos{color:#1c7a3d}
 .ticket-nums .neg{color:#b2392a}
-.ticket.won{box-shadow:inset 4px 0 0 #2f9e57}
-.ticket.lost{box-shadow:inset 4px 0 0 #d4503c;opacity:.92}
-.ticket.refund{box-shadow:inset 4px 0 0 #6d87b5}
-.ticket.cashout{box-shadow:inset 4px 0 0 #2a9d8f}
+/* Couleur du ticket selon le résultat du pari (lecture instantanée) */
+.ticket.res-won{background:#ecf8f0;box-shadow:inset 5px 0 0 #2f9e57}
+.ticket.res-lost{background:#fcece8;box-shadow:inset 5px 0 0 #d4503c}
+.ticket.res-neutral{background:#f7f4e8}
 .ticket-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
 .act{
   border:none;border-radius:9px;padding:8px 12px;font-size:13px;font-weight:700;
@@ -2092,6 +2726,81 @@ const CSS = `
 .code-banner .secondary{align-self:flex-start;padding:8px 16px;font-size:13px}
 .claim-link{background:none;border:none;color:var(--chalk-dim);text-decoration:underline;font-size:13px;cursor:pointer;font-family:inherit;text-align:center;padding:4px}
 .code-inline{font-family:'Saira Condensed',sans-serif;letter-spacing:.15em;color:var(--gold);font-size:15px;font-weight:700}
+
+/* ===== v3 — Petit Prono, sous-nav, couleurs, comparaison ===== */
+.sub-title{font-family:'Saira Condensed',sans-serif;font-weight:700;font-size:16px;letter-spacing:.06em;text-transform:uppercase;color:var(--gold);margin-top:4px}
+.cal-item{display:flex;flex-direction:column;gap:6px}
+.prono-row{display:flex;align-items:center;gap:8px;background:rgba(8,31,20,.55);border:1px solid var(--line);border-radius:10px;padding:7px 10px;flex-wrap:wrap}
+.prono-row.locked{background:transparent;border-style:dashed;font-size:12.5px;color:var(--chalk-dim);padding:5px 10px}
+.prono-lbl{font-size:12px;color:var(--chalk-dim);font-weight:600}
+.prono-score{width:46px;text-align:center;background:#0a2718;border:1px solid var(--line);border-radius:8px;color:var(--chalk);padding:8px 4px;font-size:16px;font-family:inherit;-moz-appearance:textfield}
+.prono-score::-webkit-outer-spin-button,.prono-score::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.prono-score:focus{outline:2px solid var(--gold);border-color:var(--gold)}
+.prono-dash{color:var(--chalk-dim);font-weight:700}
+.prono-ok{background:var(--gold);color:#081f14;border:none;border-radius:999px;padding:8px 14px;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;margin-left:auto}
+.prono-ok:disabled{opacity:.4;cursor:not-allowed}
+.prono-ok.danger{background:var(--loss);color:#fff}
+.prono-mine{color:var(--chalk);font-weight:600}
+.prono-res{color:var(--gold);font-weight:700}
+.prono-card{background:rgba(8,31,20,.75);border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.prono-match{font-family:'Saira Condensed',sans-serif;font-weight:700;font-size:16px;letter-spacing:.02em}
+.prono-final{font-size:13px;color:var(--gold);font-weight:700}
+.result-box{display:flex;flex-direction:column;gap:6px}
+.prono-list{list-style:none;display:flex;flex-direction:column;gap:4px;margin-top:2px}
+.prono-list li{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;font-size:13px;padding:5px 9px;border-radius:8px;background:rgba(8,31,20,.5)}
+.prono-list li b{font-variant-numeric:tabular-nums;min-width:34px;text-align:right}
+.prono-list li.exact{background:rgba(245,197,67,.16);color:var(--gold)}
+.prono-list li.part{color:var(--won)}
+.prono-list li.zero{color:var(--chalk-dim)}
+.prono-list li.mine{outline:1px solid rgba(245,197,67,.5)}
+.prono-list li span:first-child{display:flex;align-items:center;gap:2px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prono-list-score{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
+.prono-list-title{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--chalk-dim);margin-top:4px}
+.prono-liverow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+/* Statut + score d'un match (calendrier et pronostics) */
+.cal-score{display:flex;align-items:center;gap:10px;padding:2px 2px 0 56px}
+.cal-status{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;border-radius:999px;padding:2px 9px;border:1px solid var(--line);color:var(--chalk-dim)}
+.cal-status.ns{color:var(--chalk-dim)}
+.cal-status.live{color:#ff6b53;border-color:rgba(255,107,83,.5);background:rgba(255,107,83,.12)}
+.cal-status.ft{color:var(--won);border-color:rgba(92,201,122,.45);background:rgba(92,201,122,.1)}
+.cal-status.pst,.cal-status.canc{color:#e0b15c;border-color:rgba(224,177,92,.45);background:rgba(224,177,92,.1)}
+.cal-scoreline{font-family:'Saira Condensed',sans-serif;font-weight:800;font-size:16px;font-variant-numeric:tabular-nums}
+.live-dot{width:7px;height:7px;border-radius:50%;background:#ff6b53;display:inline-block;animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+@media (prefers-reduced-motion: reduce){.live-dot{animation:none}}
+.subnav{display:flex;gap:6px;background:rgba(8,31,20,.6);border:1px solid var(--line);border-radius:12px;padding:4px}
+.subnav-btn{flex:1;background:transparent;border:none;color:var(--chalk-dim);padding:9px 6px;font-size:12.5px;font-weight:700;font-family:inherit;border-radius:9px;cursor:pointer;white-space:nowrap}
+.subnav-btn.sel{background:var(--gold);color:#081f14}
+.pcolor-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex-shrink:0;margin-right:1px}
+.pcolor-dot.big{width:12px;height:12px;margin-right:5px;vertical-align:middle}
+.ticket-color{position:absolute;left:0;top:0;bottom:0;width:5px;border-top-left-radius:14px;border-bottom-left-radius:14px}
+.rank-card.mine{border-color:rgba(245,197,67,.45)}
+.badge.void{background:#e3ddcf;color:#7a7a60}
+.ticket.void{box-shadow:inset 4px 0 0 #9a8f6e;opacity:.72}
+.act.void{background:#efe3d6;color:#9a6a2e}
+.succ-row{display:flex;align-items:center;gap:8px;background:rgba(8,31,20,.7);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.succ-name{font-weight:600;font-size:13.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.succ-icons{font-size:15px;letter-spacing:2px}
+.succ-count{font-size:11px;color:var(--chalk-dim);font-variant-numeric:tabular-nums;min-width:34px;text-align:right}
+.records-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.record{background:rgba(8,31,20,.75);border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;gap:10px;align-items:flex-start}
+.record .rec-ico{font-size:20px;flex-shrink:0}
+.rec-lbl{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--chalk-dim)}
+.rec-val{font-family:'Saira Condensed',sans-serif;font-weight:800;font-size:18px;font-variant-numeric:tabular-nums}
+.rec-det{font-size:11px;color:var(--chalk-dim);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}
+.compare-selectors{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:end}
+.vs-badge{font-family:'Saira Condensed',sans-serif;font-weight:800;color:var(--gold);font-size:18px;padding-bottom:10px}
+.face-banner{text-align:center;background:rgba(245,197,67,.1);border:1px solid rgba(245,197,67,.5);border-radius:12px;padding:12px;font-weight:700;font-size:14px}
+.compare-table{background:rgba(8,31,20,.75);border:1px solid var(--line);border-radius:14px;padding:6px 12px;display:flex;flex-direction:column}
+.cmp-head,.cmp-row{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:8px;padding:8px 0;align-items:center}
+.cmp-head{border-bottom:1px solid var(--line);font-weight:700;font-size:12px}
+.cmp-head span:not(:first-child),.cmp-row span:not(:first-child){text-align:center;font-variant-numeric:tabular-nums}
+.cmp-row{border-bottom:1px solid rgba(44,90,64,.4);font-size:13px}
+.cmp-row:last-child{border-bottom:none}
+.cmp-lbl{color:var(--chalk-dim);font-size:12px}
+.cmp-a.win,.cmp-b.win{color:var(--gold);font-weight:800}
+.tab-icon{font-size:17px}
+.tab-label{font-size:10.5px;text-align:center;line-height:1.1;max-width:100%}
 `;
 const rootEl = document.getElementById("root");
 ReactDOM.createRoot(rootEl).render(React.createElement(App));
