@@ -1,9 +1,10 @@
+# À placer dans ton repo sous : .github/workflows/settle.yml
 name: Settle matches
 
 on:
   schedule:
-    - cron: '*/20 * * * *'
-  workflow_dispatch: {}
+    - cron: '0 */3 * * *'    # toutes les 3 h (openfootball est mis à jour ~au jour le jour, inutile de spammer)
+  workflow_dispatch: {}        # + bouton "Run workflow" pour lancer à la main
 
 concurrency:
   group: settle
@@ -21,4 +22,3 @@ jobs:
       - run: node settle.mjs
         env:
           FB_SA: ${{ secrets.FB_SA }}
-          API_KEY: ${{ secrets.API_KEY }}
